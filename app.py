@@ -8,8 +8,8 @@ import threading
 import time
 import os
 import json
+from collections import defaultdict
 from werkzeug.utils import secure_filename
-import pandas as pd
 
 # ============ CARGAR VARIABLES DE ENTORNO ============
 from dotenv import load_dotenv
@@ -855,40 +855,46 @@ def dashboard(usuario):
     
     todas_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).all()
     
+    # Estadísticas del dashboard
     fechas = [c.fecha_creacion for c in todas_credenciales if c.fecha_creacion]
-    df = pd.DataFrame({'fecha': fechas}) if fechas else pd.DataFrame(columns=['fecha'])
-    
-    if not df.empty:
-        df['mes'] = df['fecha'].dt.strftime('%Y-%m')
-        df['mes_nombre'] = df['fecha'].dt.strftime('%b %Y')
-        
-        datos_grafico = df.groupby(['mes', 'mes_nombre']).size().reset_index(name='cantidad')
-        datos_grafico = datos_grafico.sort_values('mes')
-        
-        hoy = datetime.now()
-        meses_12 = [(hoy - timedelta(days=30*i)).strftime('%Y-%m') for i in range(11, -1, -1)]
-        
-        meses_completos = []
-        for mes in meses_12:
-            registro = datos_grafico[datos_grafico['mes'] == mes]
-            if not registro.empty:
-                meses_completos.append({
-                    'mes': mes,
-                    'mes_nombre': registro.iloc[0]['mes_nombre'],
-                    'cantidad': int(registro.iloc[0]['cantidad'])
-                })
-            else:
-                fecha_obj = datetime.strptime(mes, '%Y-%m')
-                meses_completos.append({
-                    'mes': mes,
-                    'mes_nombre': fecha_obj.strftime('%b %Y'),
-                    'cantidad': 0
-                })
-        
-        datos_grafico = meses_completos
-    else:
-        datos_grafico = []
-    
+
+    conteo_meses = defaultdict(int)
+
+    for fecha in fechas:
+        mes = fecha.strftime('%Y-%m')
+        conteo_meses[mes] += 1
+
+    hoy = datetime.now()
+
+    # Construir los últimos 12 meses calendario
+    meses_12 = []
+    anio = hoy.year
+    mes_actual = hoy.month
+
+    for _ in range(12):
+        meses_12.append(f'{anio:04d}-{mes_actual:02d}')
+
+        mes_actual -= 1
+
+        if mes_actual == 0:
+            mes_actual = 12
+            anio -= 1
+
+    meses_12.reverse()
+
+    meses_completos = []
+
+    for mes in meses_12:
+        fecha_obj = datetime.strptime(mes, '%Y-%m')
+
+        meses_completos.append({
+            'mes': mes,
+            'mes_nombre': fecha_obj.strftime('%b %Y'),
+            'cantidad': conteo_meses.get(mes, 0)
+        })
+
+    datos_grafico = meses_completos
+
     datos_json = json.dumps(datos_grafico)
     
     return render_template('dashboard.html',

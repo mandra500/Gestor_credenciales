@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Usuarios{% endblock %}
+{% block breadcrumb %}Configuración / <span>Usuarios</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h2 style="color: var(--color-primary);">👥 Usuarios del Sistema</h2>
+        <p style="color: #999; font-size: 0.9rem;">Gestiona los usuarios que pueden acceder al gestor de credenciales</p>
+    </div>
+    <a href="{{ url_for('agregar_usuario') }}" class="btn btn-primary">➕ Nuevo Usuario</a>
+</div>
+
+<div class="card" style="padding: 1.5rem; overflow-x: auto;">
+    {% if usuarios %}
+        <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+            <thead>
+                <tr style="background: var(--color-secondary);">
+                    <th style="padding: 0.8rem; text-align: left;">Nombre</th>
+                    <th style="padding: 0.8rem; text-align: left;">Email</th>
+                    <th style="padding: 0.8rem; text-align: left;">Rol</th>
+                    <th style="padding: 0.8rem; text-align: left;">Estado</th>
+                    <th style="padding: 0.8rem; text-align: left;">Fecha Creación</th>
+                    <th style="padding: 0.8rem; text-align: center;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in usuarios %}
+                <tr style="border-bottom: 1px solid #f0ebe5;">
+                    <td style="padding: 0.8rem; font-weight: 500;">
+                        {{ user.nombre }}
+                        {% if user.id == usuario.id %}
+                        <span style="font-size: 0.6rem; background: #2196f3; color: white; padding: 0.1rem 0.5rem; border-radius: 10px; margin-left: 0.3rem;">TÚ</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem;">{{ user.email }}</td>
+                    <td style="padding: 0.8rem;">
+                        {% if user.es_admin %}
+                            <span style="background: #e74c3c; color: white; padding: 0.2rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">Administrador</span>
+                        {% else %}
+                            <span style="background: #2196f3; color: white; padding: 0.2rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">Usuario</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem;">
+                        {% if user.es_invitado %}
+                            <span style="background: #ff9800; color: white; padding: 0.2rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">⏳ Pendiente</span>
+                        {% else %}
+                            <span style="background: #4caf50; color: white; padding: 0.2rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">✅ Activo</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem; font-size: 0.85rem; color: #666;">
+                        {{ user.fecha_creacion.strftime('%d/%m/%Y %H:%M') if user.fecha_creacion else '-' }}
+                    </td>
+                    <td style="padding: 0.8rem; text-align: center;">
+                        <a href="{{ url_for('editar_usuario', id=user.id) }}" class="btn btn-outline btn-sm" title="Editar">✏️</a>
+                        {% if user.id != usuario.id %}
+                        <form action="{{ url_for('eliminar_usuario', id=user.id) }}" method="POST" style="display: inline;">
+                            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('¿Seguro que quieres eliminar este usuario?')" title="Eliminar">🗑️</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div style="text-align: center; padding: 2rem;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📭</div>
+            <p style="color: #999;">No hay usuarios registrados</p>
+            <a href="{{ url_for('agregar_usuario') }}" class="btn btn-primary" style="margin-top: 1rem;">➕ Registrar primer usuario</a>
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}

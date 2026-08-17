@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Aplicaciones{% endblock %}
+{% block breadcrumb %}Configuración / <span>Aplicaciones</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h2 style="color: var(--color-primary);">📱 Aplicaciones</h2>
+        <p style="color: #999; font-size: 0.9rem;">Gestiona las aplicaciones y sus líderes técnicos</p>
+    </div>
+    <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+        <a href="{{ url_for('exportar_aplicaciones') }}" class="btn" style="background: #217346; color: white; padding: 0.65rem 1.5rem; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: all 0.25s ease; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem;">
+            📤 Exportar
+        </a>
+        <a href="{{ url_for('importar_aplicaciones') }}" class="btn" style="background: #1976d2; color: white; padding: 0.65rem 1.5rem; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: all 0.25s ease; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem;">
+            📥 Importar
+        </a>
+        <a href="{{ url_for('agregar_aplicacion') }}" class="btn btn-primary">➕ Nueva Aplicación</a>
+    </div>
+</div>
+
+<div class="card" style="padding: 1.5rem; overflow-x: auto;">
+    {% if aplicaciones %}
+        <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+            <thead>
+                <tr style="background: var(--color-secondary);">
+                    <th style="padding: 0.8rem; text-align: left;">Código</th>
+                    <th style="padding: 0.8rem; text-align: left;">Nombre</th>
+                    <th style="padding: 0.8rem; text-align: left;">Descripción</th>
+                    <th style="padding: 0.8rem; text-align: left;">Líder Principal</th>
+                    <th style="padding: 0.8rem; text-align: left;">Contacto Principal</th>
+                    <th style="padding: 0.8rem; text-align: left;">Líder Alterno</th>
+                    <th style="padding: 0.8rem; text-align: left;">Contacto Alterno</th>
+                    <th style="padding: 0.8rem; text-align: center;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for app in aplicaciones %}
+                <tr style="border-bottom: 1px solid #f0ebe5;">
+                    <td style="padding: 0.8rem;">
+                        <span style="background: var(--color-primary); color: white; padding: 0.2rem 0.8rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem;">
+                            {{ app.codigo }}
+                        </span>
+                    </td>
+                    <td style="padding: 0.8rem; font-weight: 500;">{{ app.nombre }}</td>
+                    <td style="padding: 0.8rem; color: #666; font-size: 0.9rem;">{{ app.descripcion or '-' }}</td>
+                    <td style="padding: 0.8rem;">
+                        {% set lider_principal = app.get_lider_principal() %}
+                        {% if lider_principal %}
+                            <div style="font-weight: 500;">{{ lider_principal.nombre }}</div>
+                        {% else %}
+                            <span style="color: #bbb; font-size: 0.85rem;">No asignado</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem; font-size: 0.85rem;">
+                        {% set lider_principal = app.get_lider_principal() %}
+                        {% if lider_principal %}
+                            <div>📧 {{ lider_principal.email }}</div>
+                            <div>📱 {{ lider_principal.telefono }}</div>
+                        {% else %}
+                            <span style="color: #bbb;">Sin contacto</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem;">
+                        {% set lider_alterno = app.get_lider_alterno() %}
+                        {% if lider_alterno %}
+                            <div style="font-weight: 500;">{{ lider_alterno.nombre }}</div>
+                        {% else %}
+                            <span style="color: #bbb; font-size: 0.85rem;">No asignado</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem; font-size: 0.85rem;">
+                        {% set lider_alterno = app.get_lider_alterno() %}
+                        {% if lider_alterno %}
+                            <div>📧 {{ lider_alterno.email }}</div>
+                            <div>📱 {{ lider_alterno.telefono }}</div>
+                        {% else %}
+                            <span style="color: #bbb;">Sin contacto</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.8rem; text-align: center;">
+                        <a href="{{ url_for('editar_aplicacion', id=app.id) }}" class="btn btn-outline btn-sm" title="Editar">✏️</a>
+                        <form action="{{ url_for('eliminar_aplicacion', id=app.id) }}" method="POST" style="display: inline;">
+                            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('¿Seguro que quieres eliminar esta aplicación?')" title="Eliminar">🗑️</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div style="text-align: center; padding: 2rem;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📭</div>
+            <p style="color: #999;">No hay aplicaciones registradas</p>
+            <a href="{{ url_for('agregar_aplicacion') }}" class="btn btn-primary" style="margin-top: 1rem;">➕ Registrar primera aplicación</a>
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}

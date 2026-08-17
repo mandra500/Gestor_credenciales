@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Nuevo Usuario{% endblock %}
+{% block breadcrumb %}Configuración / Usuarios / <span>Nuevo</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 500px; margin: 0 auto; padding: 2rem;">
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">➕ Nuevo Usuario</h2>
+    <p style="color: #999; font-size: 0.9rem; margin-bottom: 1.5rem;">Registra un nuevo usuario para el gestor de credenciales</p>
+
+    <!-- ===== MENSAJE DE INVITACIÓN ===== -->
+    <div style="background: #e3f2fd; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border-left: 4px solid #2196f3;">
+        <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
+            <span style="font-size: 1.2rem;">📧</span>
+            <div>
+                <span style="font-size: 0.85rem; color: #0d47a1; font-weight: 500;">
+                    📧 Al crear el usuario, se enviará un correo de invitación con un enlace para establecer su contraseña.
+                </span>
+                <p style="font-size: 0.75rem; color: #0d47a1; margin-top: 0.2rem; opacity: 0.8;">
+                    El enlace expirará en 24 horas.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <form method="POST">
+        <div class="form-group">
+            <label>Nombre completo *</label>
+            <input type="text" name="nombre" required placeholder="Ej: Ray Baca">
+        </div>
+
+        <div class="form-group">
+            <label>Email *</label>
+            <input type="email" name="email" required placeholder="ray.baca@orion.global">
+            <small style="color: #999; font-size: 0.7rem;">El email será usado para iniciar sesión y recibir la invitación</small>
+        </div>
+
+        <!-- ===== ELIMINAR CAMPO DE CONTRASEÑA ===== -->
+        <!-- La contraseña se establecerá cuando el usuario acepte la invitación -->
+
+        <div class="form-group" style="margin-top: 0.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="es_admin">
+                Usuario Administrador
+            </label>
+            <small style="color: #999; font-size: 0.7rem;">Los administradores pueden gestionar usuarios y aplicaciones</small>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">📨 Enviar Invitación</button>
+            <a href="{{ url_for('listar_usuarios') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+
+    <!-- ===== INFORMACIÓN ADICIONAL ===== -->
+    <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e8e0d8;">
+        <p style="color: #999; font-size: 0.8rem; text-align: center;">
+            <span style="display: block;">💡 El usuario recibirá un correo con un enlace para establecer su contraseña.</span>
+            <span style="display: block; font-size: 0.75rem; margin-top: 0.2rem;">Después de aceptar la invitación, podrá iniciar sesión normalmente.</span>
+        </p>
+    </div>
+</div>
+{% endblock %}

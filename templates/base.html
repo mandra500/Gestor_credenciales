@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔐 Gestor de Credenciales</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<!-- ===== OVERLAY (para móvil) ===== -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+        <h2>🔐 Gestor</h2>
+        <p>de Credenciales</p>
+    </div>
+
+    <!-- ===== USUARIO CON BOTÓN DE CERRAR SESIÓN (JWT) ===== -->
+    <div class="sidebar-user">
+        <div class="avatar">{{ usuario.nombre[0]|upper if usuario else 'A' }}</div>
+        <div class="user-info">
+            <div class="name">{{ usuario.nombre if usuario else 'Usuario' }}</div>
+            <div class="email">{{ usuario.email if usuario else '' }}</div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="logout-btn" title="Cerrar sesión" 
+           style="background: rgba(255,255,255,0.08); padding: 0.4rem 0.8rem; border-radius: 8px; display: flex; align-items: center; gap: 0.4rem; text-decoration: none; color: rgba(255,255,255,0.6); transition: all 0.3s ease; font-size: 0.8rem; font-weight: 500;" 
+           onmouseover="this.style.background='rgba(255,107,107,0.25)'; this.style.color='#ff6b6b';" 
+           onmouseout="this.style.background='rgba(255,255,255,0.08)'; this.style.color='rgba(255,255,255,0.6)';">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            <span>Salir</span>
+        </a>
+    </div>
+
+    <ul class="sidebar-menu">
+        <!-- ===== DASHBOARD ===== -->
+        <li>
+            <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">
+                <span class="icon">📊</span> Dashboard
+            </a>
+        </li>
+
+        <!-- ===== GESTIÓN DE CREDENCIALES ===== -->
+        <li class="menu-label">Gestión de Credenciales</li>
+        <li>
+            <a href="{{ url_for('agregar') }}" class="{% if request.endpoint == 'agregar' %}active{% endif %}">
+                <span class="icon">➕</span> Nueva Credencial
+            </a>
+        </li>
+        <li>
+            <a href="{{ url_for('listar_credenciales') }}" class="{% if request.endpoint == 'listar_credenciales' %}active{% endif %}">
+                <span class="icon">📋</span> Credenciales
+                <span class="badge-menu">{{ total_credenciales if total_credenciales else 0 }}</span>
+            </a>
+        </li>
+
+        <!-- ===== ADMINISTRACIÓN ===== -->
+        <li class="menu-label">Administración</li>
+        <li>
+            <a href="#" class="menu-toggle" onclick="toggleSubmenu('submenuConfiguracion')">
+                <span class="icon">⚙️</span> Configuración
+                <span class="arrow" id="arrowConfiguracion">▶</span>
+            </a>
+            <ul class="submenu" id="submenuConfiguracion">
+                <li>
+                    <a href="{{ url_for('listar_aplicaciones') }}" class="{% if request.endpoint == 'listar_aplicaciones' or request.endpoint == 'agregar_aplicacion' or request.endpoint == 'editar_aplicacion' %}active{% endif %}">
+                        📱 Aplicaciones
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('listar_usuarios') }}" class="{% if request.endpoint == 'listar_usuarios' or request.endpoint == 'agregar_usuario' or request.endpoint == 'editar_usuario' %}active{% endif %}">
+                        👥 Usuarios
+                    </a>
+                </li>
+                <!-- ===== BACKUPS (solo visible para admin) ===== -->
+                {% if usuario and usuario.es_admin %}
+                <li>
+                    <a href="{{ url_for('configurar_backups') }}" class="{% if request.endpoint == 'configurar_backups' %}active{% endif %}">
+                        💾 Backups
+                    </a>
+                </li>
+                {% endif %}
+                <!-- ===== AUDITORÍA (solo visible para admin) ===== -->
+                {% if usuario and usuario.es_admin %}
+                <li>
+                    <a href="{{ url_for('ver_auditoria') }}" class="{% if request.endpoint == 'ver_auditoria' %}active{% endif %}">
+                        📋 Auditoría
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </li>
+
+        <!-- ===== DOCUMENTACIÓN ===== -->
+        <li class="menu-label">Documentación</li>
+        <li>
+            <a href="#">
+                <span class="icon">📚</span> Base del Conocimiento
+            </a>
+        </li>
+        <li>
+            <a href="#">
+                <span class="icon">📝</span> Guías Rápidas
+            </a>
+        </li>
+    </ul>
+</nav>
+
+<!-- ===== CONTENIDO PRINCIPAL ===== -->
+<div class="main-content" id="mainContent">
+    <!-- HEADER con hamburguesa integrada -->
+    <div class="content-header">
+        <div style="display: flex; align-items: center; gap: 0.8rem;">
+            <button class="hamburger-btn" id="hamburgerBtn" onclick="toggleSidebar()" title="Mostrar/Ocultar menú">
+                <span class="hamburger-icon">☰</span>
+            </button>
+            <div>
+                <h1>{% block page_title %}Dashboard{% endblock %}</h1>
+                <div class="breadcrumb">{% block breadcrumb %}Inicio / <span>Panel Principal</span>{% endblock %}</div>
+            </div>
+        </div>
+        <div></div>
+    </div>
+
+    <!-- Mensajes Flash -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- ===== NAVEGACIÓN RÁPIDA (se puede ocultar desde los hijos) ===== -->
+    {% block nav_buttons %}
+    <div class="nav-buttons">
+        <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline btn-sm">📋 Ver todas</a>
+        <a href="{{ url_for('agregar') }}" class="btn btn-primary btn-sm">➕ Agregar nueva</a>
+    </div>
+    {% endblock %}
+
+    <!-- Contenido -->
+    {% block content %}{% endblock %}
+</div>
+
+<!-- ===== SCRIPTS ===== -->
+<script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

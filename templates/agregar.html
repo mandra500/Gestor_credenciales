@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block page_title %}Nueva Credencial{% endblock %}
+{% block breadcrumb %}Credenciales / <span>Agregar</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 600px; margin: 0 auto;">
+    <h2 style="color: var(--color-primary); margin-bottom: 1.5rem;">➕ Nueva credencial</h2>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>Nombre del servidor *</label>
+            <input type="text" name="nombre_servidor" required placeholder="ej: CRS-JUMP-PRO-VM-011-001">
+            <small style="color: #999; font-size: 0.75rem;">El sistema intentará identificar automáticamente la aplicación por el código en el nombre</small>
+        </div>
+
+        <div class="form-group">
+            <label>Dirección IP *</label>
+            <input type="text" name="ip" required placeholder="ej: 192.168.1.100">
+        </div>
+
+        <div class="form-group">
+            <label>Descripción</label>
+            <input type="text" name="descripcion" placeholder="Breve descripción del servidor">
+        </div>
+
+        <div class="form-group">
+            <label>Usuario *</label>
+            <input type="text" name="usuario" required placeholder="ej: admin">
+        </div>
+
+        <!-- ===== SELECCIONAR APLICACIÓN ===== -->
+        <div class="form-group">
+            <label>Aplicación</label>
+            <select name="aplicacion_id" style="width: 100%; padding: 0.75rem 1rem; border: 2px solid #e8e0d8; border-radius: 12px; font-size: 1rem; background: #faf8f6;">
+                <option value="">🔍 Identificar automáticamente</option>
+                {% for app in aplicaciones %}
+                <option value="{{ app.id }}">
+                    [{{ app.codigo }}] {{ app.nombre }}
+                    {% if app.lider_nombre %} - {{ app.lider_nombre }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <small style="color: #999; font-size: 0.75rem;">
+                💡 Selecciona la aplicación o déjalo en "Identificar automáticamente" para que el sistema la detecte por el código en el nombre del servidor.
+                <br>📌 <strong>Códigos disponibles:</strong> 
+                {% for app in aplicaciones %}
+                    <span style="background: var(--color-secondary); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.7rem; margin: 0.1rem;">{{ app.codigo }}</span>
+                {% endfor %}
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label>Tipo de autenticación *</label>
+            <select name="tipo_autenticacion" id="tipoAuth" required onchange="toggleCampos()">
+                <option value="password">🔑 Usuario y Contraseña</option>
+                <option value="llave">🔐 Usuario y Llave SSH (.ppk)</option>
+            </select>
+        </div>
+
+        <div id="camposPassword">
+            <div class="form-group">
+                <label>Contraseña *</label>
+                <input type="password" name="contrasena" placeholder="Contraseña segura">
+            </div>
+        </div>
+
+        <div id="camposLlave" style="display: none;">
+            <div class="form-group" style="border: 2px dashed var(--color-primary); border-radius: 12px; padding: 1.5rem; text-align: center; background: #faf8f6;">
+                <label style="cursor: pointer; display: block;">
+                    <div style="font-size: 3rem; margin-bottom: 0.5rem;">📁</div>
+                    <div style="font-weight: 500; color: var(--color-primary);">Seleccionar archivo .ppk</div>
+                    <div style="font-size: 0.85rem; color: #999; margin-top: 0.3rem;">Haz clic para buscar o arrastra tu archivo .ppk</div>
+                    <input type="file" name="archivo_ppk" accept=".ppk,.pem,.key" style="display: none;" id="fileInput" onchange="mostrarNombreArchivo()">
+                </label>
+                <div id="nombreArchivo" style="margin-top: 0.8rem; font-size: 0.9rem; color: var(--color-accent);"></div>
+            </div>
+            
+            <div style="text-align: center; margin: 1rem 0; color: #999;">— O pega el contenido manualmente —</div>
+            
+            <div class="form-group">
+                <label>Contenido de la llave privada</label>
+                <textarea name="llave_privada" rows="6" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;MIIEpAIBAAKCAQEA...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label>Llave pública (opcional)</label>
+                <textarea name="llave_publica" rows="3" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."></textarea>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">💾 Guardar</button>
+            <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function toggleCampos() {
+    const tipo = document.getElementById('tipoAuth').value;
+    document.getElementById('camposPassword').style.display = tipo === 'password' ? 'block' : 'none';
+    document.getElementById('camposLlave').style.display = tipo === 'llave' ? 'block' : 'none';
+}
+
+function mostrarNombreArchivo() {
+    const input = document.getElementById('fileInput');
+    const nombreDiv = document.getElementById('nombreArchivo');
+    if (input.files && input.files[0]) {
+        nombreDiv.innerHTML = '✅ Archivo seleccionado: <strong>' + input.files[0].name + '</strong> (' + (input.files[0].size / 1024).toFixed(1) + ' KB)';
+    } else {
+        nombreDiv.innerHTML = '';
+    }
+}
+</script>
+{% endblock %}

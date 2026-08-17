@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+
+{% block page_title %}Credenciales{% endblock %}
+{% block breadcrumb %}Credenciales / <span>Lista</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h2 style="color: var(--color-text);">🔐 Credenciales</h2>
+        <p style="color: #999; font-size: 0.9rem;">Gestiona tus accesos a servidores y aplicaciones</p>
+    </div>
+    <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+        <a href="{{ url_for('agregar') }}" class="btn btn-primary">➕ Nueva Credencial</a>
+    </div>
+</div>
+
+<!-- ===== FILTROS ===== -->
+<div class="card" style="padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
+    <form method="GET" action="{{ url_for('listar_credenciales') }}" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <!-- Filtro por Aplicación -->
+        <div style="flex: 1; min-width: 150px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">📱 Aplicación</label>
+            <select name="aplicacion" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem; background: #faf8f6;">
+                <option value="">Todas</option>
+                {% for app in aplicaciones %}
+                <option value="{{ app.id }}" {% if aplicacion_seleccionada == app.id %}selected{% endif %}>
+                    [{{ app.codigo }}] {{ app.nombre }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Filtro por Estado -->
+        <div style="flex: 1; min-width: 120px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">📊 Estado</label>
+            <select name="estado" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem; background: #faf8f6;">
+                <option value="">Todos</option>
+                <option value="activo" {% if estado_seleccionado == 'activo' %}selected{% endif %}>🟢 Activo</option>
+                <option value="inactivo" {% if estado_seleccionado == 'inactivo' %}selected{% endif %}>🔴 Inactivo</option>
+            </select>
+        </div>
+
+        <!-- Búsqueda -->
+        <div style="flex: 2; min-width: 200px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">🔍 Buscar</label>
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" name="buscar" value="{{ busqueda }}" placeholder="Servidor, IP, usuario..." style="flex: 1; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem;">
+                <button type="submit" class="btn btn-primary btn-sm" style="padding: 0.5rem 1.2rem;">Filtrar</button>
+                <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline btn-sm" style="padding: 0.5rem 1.2rem;">Limpiar</a>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ===== TABLA DE CREDENCIALES ===== -->
+<div class="card" style="padding: 0; overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; min-width: 900px;">
+        <thead>
+            <tr style="background: var(--color-secondary);">
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Aplicación</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Servidor</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">IP</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Usuario</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Tipo</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Estado</th>
+                <th style="padding: 0.8rem 1rem; text-align: left; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Sesión</th>
+                <th style="padding: 0.8rem 1rem; text-align: center; font-weight: 600; font-size: 0.85rem; color: var(--color-text);">Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if credenciales %}
+                {% for cred in credenciales %}
+                <tr style="border-bottom: 1px solid #f0ebe5; transition: background 0.2s;" onmouseover="this.style.background='#faf8f6'" onmouseout="this.style.background='transparent'">
+                    <!-- Aplicación -->
+                    <td style="padding: 0.8rem 1rem;">
+                        {% if cred.aplicacion %}
+                            <span style="background: var(--color-primary); color: white; padding: 0.15rem 0.6rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">
+                                {{ cred.aplicacion.codigo }}
+                            </span>
+                            <span style="font-size: 0.7rem; color: #888; display: block; margin-top: 0.1rem;">{{ cred.aplicacion.nombre|truncate(15) }}</span>
+                        {% else %}
+                            <span style="color: #bbb; font-size: 0.7rem;">Sin asignar</span>
+                        {% endif %}
+                    </td>
+                    
+                    <!-- Servidor -->
+                    <td style="padding: 0.8rem 1rem;">
+                        <strong style="font-size: 0.9rem;">{{ cred.nombre_servidor }}</strong>
+                        <div style="font-size: 0.7rem; color: #999; margin-top: 0.1rem;">{{ cred.descripcion or '' }}</div>
+                    </td>
+                    
+                    <!-- IP -->
+                    <td style="padding: 0.8rem 1rem; font-family: monospace; font-size: 0.85rem; color: #666;">
+                        {{ cred.ip }}
+                    </td>
+                    
+                    <!-- Usuario -->
+                    <td style="padding: 0.8rem 1rem;">
+                        <span style="font-family: monospace; font-size: 0.85rem;">{{ cred.usuario }}</span>
+                    </td>
+                    
+                    <!-- Tipo -->
+                    <td style="padding: 0.8rem 1rem;">
+                        {% if cred.tipo_autenticacion == 'password' %}
+                            <span style="color: #ff9800;">🔑</span> Contraseña
+                        {% else %}
+                            <span style="color: #9c27b0;">🔐</span> Llave SSH
+                        {% endif %}
+                    </td>
+                    
+                    <!-- Estado (usando dias_inactivo) -->
+                    <td style="padding: 0.8rem 1rem;">
+                        {% set dias = cred.dias_inactivo if cred.dias_inactivo is defined else 0 %}
+                        {% if dias <= 30 %}
+                            <span style="background: #e8f5e9; color: #2e7d32; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">🟢 Activo</span>
+                        {% elif dias <= 60 %}
+                            <span style="background: #fff3e0; color: #e65100; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">🟡 {{ dias }} días</span>
+                        {% else %}
+                            <span style="background: #ffebee; color: #c62828; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">🔴 Inactivo</span>
+                        {% endif %}
+                    </td>
+                    
+                    <!-- ===== ESTADO DE SESIÓN ===== -->
+                    <td style="padding: 0.8rem 1rem;">
+                        {% set sesion_activa = cred.sesion_activa %}
+                        {% if sesion_activa %}
+                            <span style="background: #fff3e0; color: #e65100; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">
+                                🟡 En uso
+                            </span>
+                            <div style="font-size: 0.6rem; color: #999; margin-top: 0.2rem;">
+                                Ticket: <strong>{{ sesion_activa.ticket.numero_ticket if sesion_activa.ticket else 'N/A' }}</strong>
+                                <br>Usuario: {{ sesion_activa.usuario.nombre }}
+                                <br>Desde: {{ sesion_activa.check_in.strftime('%d/%m %H:%M') }}
+                            </div>
+                        {% else %}
+                            <span style="background: #e8f5e9; color: #2e7d32; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">
+                                🟢 Disponible
+                            </span>
+                        {% endif %}
+                    </td>
+                    
+                    <!-- ===== ACCIONES ===== -->
+                    <td style="padding: 0.8rem 1rem; text-align: center;">
+                        <div style="display: flex; gap: 0.3rem; justify-content: center; flex-wrap: wrap;">
+                            <!-- Check-in / Check-out -->
+                            {% set sesion_activa = cred.sesion_activa %}
+                            {% if sesion_activa %}
+                                <!-- Check-out -->
+                                <button onclick="abrirCheckout({{ cred.id }})" style="background: #ff9800; color: white; border: none; cursor: pointer; font-size: 0.65rem; padding: 0.2rem 0.6rem; border-radius: 4px;" title="Check-out">
+                                    📤 Check-out
+                                </button>
+                            {% else %}
+                                <!-- Check-in -->
+                                <button onclick="abrirCheckin({{ cred.id }})" style="background: #4caf50; color: white; border: none; cursor: pointer; font-size: 0.65rem; padding: 0.2rem 0.6rem; border-radius: 4px;" title="Check-in">
+                                    📥 Check-in
+                                </button>
+                            {% endif %}
+                            
+                            <!-- Copiar IP -->
+                            <button onclick="copiarTexto('ip_{{ cred.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #666; padding: 0.2rem 0.3rem; border-radius: 4px;" title="Copiar IP" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">🌐</button>
+                            
+                            <!-- Copiar Usuario -->
+                            <button onclick="copiarTextoUsuario('{{ cred.usuario }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #666; padding: 0.2rem 0.3rem; border-radius: 4px;" title="Copiar Usuario" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">👤</button>
+                            
+                            <!-- Ver/Copiar Contraseña -->
+                            {% if cred.tipo_autenticacion == 'password' %}
+                            <button onclick="verPassword('{{ cred.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #666; padding: 0.2rem 0.3rem; border-radius: 4px;" title="Ver contraseña" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">👁️</button>
+                            <button onclick="copiarPassword('{{ cred.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #666; padding: 0.2rem 0.3rem; border-radius: 4px;" title="Copiar contraseña" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">📋</button>
+                            {% endif %}
+                            
+                            <!-- Editar -->
+                            <a href="{{ url_for('editar', id=cred.id) }}" style="text-decoration: none; font-size: 0.9rem; color: #666; padding: 0.2rem 0.3rem; border-radius: 4px;" title="Editar" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">✏️</a>
+                            
+                            <!-- Eliminar -->
+                            <form action="{{ url_for('eliminar', id=cred.id) }}" method="POST" style="display: inline;">
+                                <button type="submit" class="btn btn-danger btn-sm" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #e74c3c; padding: 0.2rem 0.3rem; border-radius: 4px;" onclick="return confirm('¿Seguro que quieres eliminar esta credencial?')" title="Eliminar" onmouseover="this.style.background='#f0ebe5'" onmouseout="this.style.background='transparent'">🗑️</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 3rem;">
+                        <div style="font-size: 4rem; margin-bottom: 1rem;">📭</div>
+                        <p style="color: #999; font-size: 1.1rem;">No hay credenciales que coincidan con los filtros</p>
+                        <p style="color: #bbb; font-size: 0.9rem; margin-top: 0.5rem;">Prueba cambiando los filtros o agrega una nueva credencial</p>
+                        <a href="{{ url_for('agregar') }}" class="btn btn-primary" style="margin-top: 1rem;">➕ Agregar credencial</a>
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- ===== CONTADOR ===== -->
+<div style="display: flex; justify-content: center; margin-top: 1rem;">
+    <div style="font-size: 0.85rem; color: #999;">
+        Mostrando <strong>{{ credenciales|length }}</strong> de <strong>{{ total_credenciales }}</strong> credenciales
+    </div>
+</div>
+
+<!-- ===== MODAL CHECK-IN ===== -->
+<div id="modalCheckin" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 400px; width: 90%;">
+        <h3 style="color: var(--color-primary); margin-bottom: 1rem;">📥 Check-in</h3>
+        <form id="formCheckin" method="POST" action="{{ url_for('checkin_credencial', credencial_id=0) }}">
+            <div class="form-group">
+                <label>Número de Ticket (Jira) *</label>
+                <input type="text" id="ticketInput" name="ticket_key" required placeholder="Ej: PROY-123" style="text-transform: uppercase;">
+                <small style="color: #999; font-size: 0.7rem;">El ticket debe estar abierto en Jira</small>
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                <button type="submit" class="btn btn-primary">✅ Confirmar Check-in</button>
+                <button type="button" onclick="cerrarModalCheckin()" class="btn btn-outline">Cancelar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== MODAL CHECK-OUT ===== -->
+<div id="modalCheckout" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
+    <div style="background: white; padding: 2rem; border-radius: 16px; max-width: 400px; width: 90%;">
+        <h3 style="color: var(--color-primary); margin-bottom: 1rem;">📤 Check-out</h3>
+        <form id="formCheckout" method="POST" action="{{ url_for('checkout_credencial', sesion_id=0) }}">
+            <div class="form-group">
+                <label>Motivo de cierre</label>
+                <input type="text" name="motivo" placeholder="Ticket completado" value="Ticket completado">
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                <button type="submit" class="btn btn-primary">✅ Confirmar Check-out</button>
+                <button type="button" onclick="cerrarModalCheckout()" class="btn btn-outline">Cancelar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== SCRIPTS ===== -->
+<script>
+// ===== MODALES CHECK-IN/CHECK-OUT =====
+let credencialIdActual = null;
+
+function abrirCheckin(id) {
+    credencialIdActual = id;
+    const modal = document.getElementById('modalCheckin');
+    const form = document.getElementById('formCheckin');
+    form.action = '/checkin/' + id;
+    modal.style.display = 'flex';
+    document.getElementById('ticketInput').value = '';
+    document.getElementById('ticketInput').focus();
+}
+
+function cerrarModalCheckin() {
+    document.getElementById('modalCheckin').style.display = 'none';
+    credencialIdActual = null;
+}
+
+function abrirCheckout(id) {
+    credencialIdActual = id;
+    const modal = document.getElementById('modalCheckout');
+    const form = document.getElementById('formCheckout');
+    form.action = '/checkout/' + id;
+    modal.style.display = 'flex';
+}
+
+function cerrarModalCheckout() {
+    document.getElementById('modalCheckout').style.display = 'none';
+    credencialIdActual = null;
+}
+
+// Cerrar modales al hacer clic fuera
+document.addEventListener('click', function(e) {
+    const modalCheckin = document.getElementById('modalCheckin');
+    const modalCheckout = document.getElementById('modalCheckout');
+    if (e.target === modalCheckin) cerrarModalCheckin();
+    if (e.target === modalCheckout) cerrarModalCheckout();
+});
+
+// ===== VER CONTRASEÑA =====
+function verPassword(id) {
+    const span = document.getElementById('password_' + id);
+    if (!span) {
+        alert('🔒 Para ver la contraseña, ve a la vista de edición');
+        return;
+    }
+    
+    if (span.textContent === '••••••••') {
+        fetch('/obtener-contrasena/' + id)
+            .then(response => response.json())
+            .then(data => {
+                if (data.contrasena) {
+                    span.textContent = data.contrasena;
+                    mostrarNotificacion('👁️ Contraseña visible por 10 segundos');
+                    setTimeout(() => {
+                        span.textContent = '••••••••';
+                    }, 10000);
+                } else {
+                    if (data.sugerencia) {
+                        mostrarNotificacion('⚠️ ' + data.error + ' - ' + data.sugerencia);
+                    } else {
+                        mostrarNotificacion('⚠️ ' + (data.error || 'No se pudo obtener la contraseña'));
+                    }
+                }
+            })
+            .catch(error => {
+                mostrarNotificacion('❌ Error al obtener la contraseña');
+            });
+    } else {
+        span.textContent = '••••••••';
+        mostrarNotificacion('🔒 Contraseña oculta');
+    }
+}
+
+// ===== COPIAR CONTRASEÑA =====
+function copiarPassword(id) {
+    const span = document.getElementById('password_' + id);
+    
+    if (!span) {
+        alert('🔒 Para copiar la contraseña, ve a la vista de edición');
+        return;
+    }
+    
+    const copiar = (texto) => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(texto)
+                .then(() => mostrarNotificacion('✅ Contraseña copiada al portapapeles'))
+                .catch(() => copiarFallback(texto));
+        } else {
+            copiarFallback(texto);
+        }
+    };
+    
+    if (span.textContent === '••••••••') {
+        fetch('/obtener-contrasena/' + id)
+            .then(response => response.json())
+            .then(data => {
+                if (data.contrasena) {
+                    copiar(data.contrasena);
+                } else {
+                    if (data.sugerencia) {
+                        mostrarNotificacion('⚠️ ' + data.error + ' - ' + data.sugerencia);
+                    } else {
+                        mostrarNotificacion('⚠️ ' + (data.error || 'No se pudo obtener la contraseña'));
+                    }
+                }
+            })
+            .catch(error => {
+                mostrarNotificacion('❌ Error al obtener la contraseña');
+            });
+    } else {
+        copiar(span.textContent);
+    }
+}
+
+// ===== COPIAR TEXTO (IP) =====
+function copiarTexto(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        const texto = element.textContent.trim();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(texto)
+                .then(() => mostrarNotificacion('✅ IP copiada al portapapeles'))
+                .catch(() => copiarFallback(texto));
+        } else {
+            copiarFallback(texto);
+        }
+    }
+}
+
+// ===== COPIAR USUARIO =====
+function copiarTextoUsuario(usuario) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(usuario)
+            .then(() => mostrarNotificacion('✅ Usuario copiado al portapapeles'))
+            .catch(() => copiarFallback(usuario));
+    } else {
+        copiarFallback(usuario);
+    }
+}
+
+// ===== COPIAR FALLBACK =====
+function copiarFallback(texto) {
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        mostrarNotificacion('✅ Copiado al portapapeles');
+    } catch (e) {
+        mostrarNotificacion('❌ No se pudo copiar');
+    }
+}
+
+// ===== NOTIFICACIÓN =====
+function mostrarNotificacion(mensaje) {
+    const existing = document.querySelector('.custom-notification');
+    if (existing) existing.remove();
+    
+    const notificacion = document.createElement('div');
+    notificacion.className = 'custom-notification';
+    notificacion.textContent = mensaje;
+    notificacion.style.cssText = `
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--color-primary, #D4A373);
+        color: white;
+        padding: 0.8rem 2rem;
+        border-radius: 12px;
+        font-weight: 500;
+        box-shadow: 0 8px 30px rgba(212, 163, 115, 0.4);
+        z-index: 9999;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        max-width: 90%;
+        text-align: center;
+        animation: fadeInUp 0.3s ease;
+    `;
+    document.body.appendChild(notificacion);
+    
+    setTimeout(() => {
+        notificacion.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        notificacion.style.opacity = '0';
+        notificacion.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => {
+            if (notificacion.parentNode) {
+                document.body.removeChild(notificacion);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// ===== ESTILO =====
+const styleNotif = document.createElement('style');
+styleNotif.textContent = `
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+`;
+document.head.appendChild(styleNotif);
+</script>
+{% endblock %}

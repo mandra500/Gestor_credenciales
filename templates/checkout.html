@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block page_title %}Check-out Credencial{% endblock %}
+{% block breadcrumb %}Credenciales / <span>Check-out</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 500px; margin: 0 auto; padding: 2rem;">
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">📤 Check-out</h2>
+    
+    <div style="background: #e3f2fd; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border-left: 4px solid #2196f3;">
+        <p style="font-size: 0.9rem; color: #0d47a1; margin: 0;">
+            <strong>Ticket:</strong> {{ sesion.ticket.numero_ticket }}<br>
+            <strong>Credencial:</strong> {{ credencial.nombre_servidor }}<br>
+            <strong>Check-in:</strong> {{ sesion.check_in.strftime('%d/%m/%Y %H:%M') }}
+        </p>
+    </div>
+    
+    <div style="background: #fff3e0; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border-left: 4px solid #ff9800;">
+        <p style="font-size: 0.85rem; color: #e65100; margin: 0;">
+            ⚠️ Al hacer check-out, se generará una nueva contraseña y se actualizará en Jira.
+        </p>
+    </div>
+    
+    <form method="POST">
+        <div class="form-group">
+            <label>Motivo de cierre</label>
+            <input type="text" name="motivo" placeholder="Ej: Ticket resuelto" value="Ticket completado">
+        </div>
+        
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">✅ Confirmar Check-out</button>
+            <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+# Entorno Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Secretos
+.env
+credencial_activa.json
+
+# Base de datos local
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos sensibles / claves
+uploads/
+backups/
+
+# Archivos temporales
+*.log

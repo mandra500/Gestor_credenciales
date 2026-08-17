@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block page_title %}Auditoría{% endblock %}
+{% block breadcrumb %}Administración / <span>Auditoría</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h2 style="color: var(--color-text);">📋 Registro de Auditoría</h2>
+        <p style="color: #999; font-size: 0.9rem;">Historial de acciones realizadas en el sistema</p>
+    </div>
+    <div style="font-size: 0.85rem; color: #999;">
+        Total: <strong>{{ logs|length }}</strong> registros
+    </div>
+</div>
+
+<!-- ===== FILTROS ===== -->
+<div class="card" style="padding: 1rem 1.5rem; margin-bottom: 1.5rem;">
+    <form method="GET" action="{{ url_for('ver_auditoria') }}" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+        <!-- Filtro por Acción -->
+        <div style="flex: 1; min-width: 120px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">Acción</label>
+            <select name="accion" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem; background: #faf8f6;">
+                <option value="">Todas</option>
+                {% for a in acciones %}
+                <option value="{{ a }}" {% if accion_seleccionada == a %}selected{% endif %}>{{ a|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Filtro por Entidad -->
+        <div style="flex: 1; min-width: 120px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">Entidad</label>
+            <select name="entidad" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem; background: #faf8f6;">
+                <option value="">Todas</option>
+                {% for e in entidades %}
+                <option value="{{ e }}" {% if entidad_seleccionada == e %}selected{% endif %}>{{ e|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Fecha Desde -->
+        <div style="flex: 1; min-width: 130px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">Fecha Desde</label>
+            <input type="date" name="fecha_desde" value="{{ fecha_desde }}" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem;">
+        </div>
+
+        <!-- Fecha Hasta -->
+        <div style="flex: 1; min-width: 130px;">
+            <label style="font-size: 0.8rem; color: #666; display: block; margin-bottom: 0.2rem;">Fecha Hasta</label>
+            <input type="date" name="fecha_hasta" value="{{ fecha_hasta }}" style="width: 100%; padding: 0.5rem 0.8rem; border: 2px solid #e8e0d8; border-radius: 8px; font-size: 0.9rem;">
+        </div>
+
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary btn-sm" style="padding: 0.5rem 1.2rem;">Filtrar</button>
+            <a href="{{ url_for('ver_auditoria') }}" class="btn btn-outline btn-sm" style="padding: 0.5rem 1.2rem;">Limpiar</a>
+        </div>
+    </form>
+</div>
+
+<!-- ===== TABLA DE LOGS ===== -->
+<div class="card" style="padding: 0; overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; min-width: 700px;">
+        <thead>
+            <tr style="background: var(--color-secondary);">
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">Fecha</th>
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">Usuario</th>
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">Acción</th>
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">Entidad</th>
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">Detalles</th>
+                <th style="padding: 0.6rem 0.8rem; text-align: left; font-weight: 600; font-size: 0.8rem; color: var(--color-text);">IP</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if logs %}
+                {% for log in logs %}
+                <tr style="border-bottom: 1px solid #f0ebe5; font-size: 0.85rem;">
+                    <td style="padding: 0.6rem 0.8rem; color: #666; white-space: nowrap;">
+                        {{ log.fecha.strftime('%d/%m/%Y %H:%M') }}
+                    </td>
+                    <td style="padding: 0.6rem 0.8rem;">
+                        {% if log.usuario %}
+                            <strong>{{ log.usuario.nombre }}</strong>
+                            <div style="font-size: 0.7rem; color: #999;">{{ log.usuario.email }}</div>
+                        {% else %}
+                            <span style="color: #bbb;">Usuario eliminado</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.6rem 0.8rem;">
+                        {% if log.accion == 'crear' %}
+                            <span style="color: #4caf50;">➕ Crear</span>
+                        {% elif log.accion == 'editar' %}
+                            <span style="color: #2196f3;">✏️ Editar</span>
+                        {% elif log.accion == 'eliminar' %}
+                            <span style="color: #e74c3c;">🗑️ Eliminar</span>
+                        {% elif log.accion == 'login' %}
+                            <span style="color: #4caf50;">🔓 Login</span>
+                        {% elif log.accion == 'logout' %}
+                            <span style="color: #ff9800;">🔒 Logout</span>
+                        {% elif log.accion == 'ver' %}
+                            <span style="color: #9c27b0;">👁️ Ver</span>
+                        {% else %}
+                            <span>{{ log.accion|capitalize }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.6rem 0.8rem; color: #666;">
+                        {{ log.entidad|capitalize }}
+                        {% if log.entidad_id %}
+                            <span style="font-size: 0.7rem; color: #bbb;">(#{{ log.entidad_id }})</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.6rem 0.8rem; color: #666; max-width: 200px; word-break: break-word;">
+                        {{ log.detalles or '-' }}
+                    </td>
+                    <td style="padding: 0.6rem 0.8rem; font-family: monospace; font-size: 0.75rem; color: #999;">
+                        {{ log.ip or '-' }}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 2rem; color: #999;">
+                        <div style="font-size: 3rem; margin-bottom: 0.5rem;">📭</div>
+                        <p>No hay registros de auditoría</p>
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- ===== INFORMACIÓN ADICIONAL ===== -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+    <div class="card" style="text-align: center; padding: 0.8rem;">
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--color-primary);">{{ logs|length }}</div>
+        <div style="font-size: 0.75rem; color: #999;">Registros mostrados</div>
+    </div>
+    <div class="card" style="text-align: center; padding: 0.8rem;">
+        <div style="font-size: 1.2rem; font-weight: 700; color: #4caf50;">{{ logs|selectattr('accion', 'equalto', 'crear')|list|length }}</div>
+        <div style="font-size: 0.75rem; color: #999;">Creaciones</div>
+    </div>
+    <div class="card" style="text-align: center; padding: 0.8rem;">
+        <div style="font-size: 1.2rem; font-weight: 700; color: #2196f3;">{{ logs|selectattr('accion', 'equalto', 'editar')|list|length }}</div>
+        <div style="font-size: 0.75rem; color: #999;">Ediciones</div>
+    </div>
+    <div class="card" style="text-align: center; padding: 0.8rem;">
+        <div style="font-size: 1.2rem; font-weight: 700; color: #e74c3c;">{{ logs|selectattr('accion', 'equalto', 'eliminar')|list|length }}</div>
+        <div style="font-size: 0.75rem; color: #999;">Eliminaciones</div>
+    </div>
+</div>
+
+{% endblock %}

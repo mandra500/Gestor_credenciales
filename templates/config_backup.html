@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Backups{% endblock %}
+{% block breadcrumb %}Configuración / <span>Backups</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h2 style="color: var(--color-text);">💾 Configuración de Backups</h2>
+        <p style="color: #999; font-size: 0.9rem;">Gestiona los respaldos automáticos de la base de datos</p>
+    </div>
+    <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+        <a href="{{ url_for('ejecutar_backup_full') }}" class="btn" style="background: #217346; color: white; padding: 0.65rem 1.5rem; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: all 0.25s ease; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem;">
+            📦 Backup Full
+        </a>
+        <a href="{{ url_for('ejecutar_backup_incremental') }}" class="btn" style="background: #1976d2; color: white; padding: 0.65rem 1.5rem; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: all 0.25s ease; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem;">
+            📦 Backup Incremental
+        </a>
+    </div>
+</div>
+
+<!-- ===== ESTADÍSTICAS ===== -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+    <div class="card" style="text-align: center; padding: 1rem;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: var(--color-primary);">{{ total_backups }}</div>
+        <div style="font-size: 0.8rem; color: #999;">Total Backups</div>
+    </div>
+    <div class="card" style="text-align: center; padding: 1rem;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #4caf50;">{{ exitosos }}</div>
+        <div style="font-size: 0.8rem; color: #999;">Exitosos</div>
+    </div>
+    <div class="card" style="text-align: center; padding: 1rem;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #e74c3c;">{{ fallidos }}</div>
+        <div style="font-size: 0.8rem; color: #999;">Fallidos</div>
+    </div>
+</div>
+
+<!-- ===== CONFIGURACIÓN ===== -->
+<div class="card" style="padding: 1.5rem; max-width: 700px; margin: 0 auto;">
+    <h3 style="color: var(--color-text); margin-bottom: 1rem;">⚙️ Programación de Backups</h3>
+    
+    <form method="POST">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+                <label>Frecuencia Backup Full (días)</label>
+                <input type="number" name="frecuencia_full" value="{{ config.frecuencia_full }}" min="1" max="365">
+                <small style="color: #999; font-size: 0.7rem;">Cada cuántos días hacer backup completo</small>
+            </div>
+            <div class="form-group">
+                <label>Frecuencia Incremental (días)</label>
+                <input type="number" name="frecuencia_incremental" value="{{ config.frecuencia_incremental }}" min="1" max="30">
+                <small style="color: #999; font-size: 0.7rem;">Cada cuántos días hacer backup incremental</small>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+                <label>Hora (24h)</label>
+                <input type="number" name="hora" value="{{ config.hora }}" min="0" max="23">
+            </div>
+            <div class="form-group">
+                <label>Minuto</label>
+                <input type="number" name="minuto" value="{{ config.minuto }}" min="0" max="59">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Máximo de backups a mantener</label>
+            <input type="number" name="max_backups" value="{{ config.max_backups }}" min="1" max="100">
+            <small style="color: #999; font-size: 0.7rem;">Los backups más antiguos se eliminarán automáticamente</small>
+        </div>
+        
+        <div class="form-group" style="margin-top: 0.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="activo" {% if config.activo %}checked{% endif %}>
+                Backups automáticos activos
+            </label>
+        </div>
+        
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">💾 Guardar Configuración</button>
+        </div>
+    </form>
+    
+    <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e8e0d8;">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; font-size: 0.85rem; color: #666;">
+            <div>📅 Último Full: <strong>{{ config.ultimo_backup_full.strftime('%d/%m/%Y %H:%M') if config.ultimo_backup_full else 'Nunca' }}</strong></div>
+            <div>📅 Último Incremental: <strong>{{ config.ultimo_backup_incremental.strftime('%d/%m/%Y %H:%M') if config.ultimo_backup_incremental else 'Nunca' }}</strong></div>
+            <div>📂 Carpeta: <strong>{{ config.carpeta_destino }}</strong></div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== LOGS DE BACKUP ===== -->
+<div class="card" style="padding: 1.5rem; margin-top: 1.5rem;">
+    <h3 style="color: var(--color-text); margin-bottom: 1rem;">📋 Historial de Backups</h3>
+    
+    {% if logs %}
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; min-width: 500px;">
+                <thead>
+                    <tr style="background: var(--color-secondary);">
+                        <th style="padding: 0.5rem 0.8rem; text-align: left; font-size: 0.8rem;">Fecha</th>
+                        <th style="padding: 0.5rem 0.8rem; text-align: left; font-size: 0.8rem;">Tipo</th>
+                        <th style="padding: 0.5rem 0.8rem; text-align: left; font-size: 0.8rem;">Archivo</th>
+                        <th style="padding: 0.5rem 0.8rem; text-align: left; font-size: 0.8rem;">Tamaño</th>
+                        <th style="padding: 0.5rem 0.8rem; text-align: left; font-size: 0.8rem;">Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr style="border-bottom: 1px solid #f0ebe5;">
+                        <td style="padding: 0.5rem 0.8rem; font-size: 0.8rem; color: #666;">{{ log.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td style="padding: 0.5rem 0.8rem; font-size: 0.8rem;">
+                            {% if log.tipo == 'full' %}
+                                <span style="color: #217346;">📦 Full</span>
+                            {% else %}
+                                <span style="color: #1976d2;">📦 Incremental</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.5rem 0.8rem; font-size: 0.75rem; font-family: monospace; color: #666;">{{ log.archivo or '-' }}</td>
+                        <td style="padding: 0.5rem 0.8rem; font-size: 0.8rem; color: #666;">
+                            {% if log.tamaño %}
+                                {{ (log.tamaño / 1024 / 1024)|round(2) }} MB
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.5rem 0.8rem;">
+                            {% if log.estado == 'exitoso' %}
+                                <span style="color: #4caf50;">✅ Exitoso</span>
+                            {% else %}
+                                <span style="color: #e74c3c;">❌ Fallido</span>
+                                {% if log.mensaje %}
+                                    <div style="font-size: 0.7rem; color: #999; max-width: 200px;">{{ log.mensaje }}</div>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p style="text-align: center; color: #999; padding: 1rem;">No hay registros de backups</p>
+    {% endif %}
+</div>
+
+{% endblock %}

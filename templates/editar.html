@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block page_title %}Editar Credencial{% endblock %}
+{% block breadcrumb %}Credenciales / <span>Editar</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 600px; margin: 0 auto;">
+    <h2 style="color: var(--color-primary); margin-bottom: 1.5rem;">✏️ Editar credencial</h2>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>Nombre del servidor *</label>
+            <input type="text" name="nombre_servidor" required value="{{ credencial.nombre_servidor }}">
+        </div>
+
+        <div class="form-group">
+            <label>Dirección IP *</label>
+            <input type="text" name="ip" required value="{{ credencial.ip or '' }}" placeholder="ej: 192.168.1.100">
+        </div>
+
+        <div class="form-group">
+            <label>Descripción</label>
+            <input type="text" name="descripcion" value="{{ credencial.descripcion or '' }}" placeholder="Breve descripción del servidor">
+        </div>
+
+        <div class="form-group">
+            <label>Usuario *</label>
+            <input type="text" name="usuario" required value="{{ credencial.usuario }}">
+        </div>
+
+        <!-- ===== SELECCIONAR APLICACIÓN ===== -->
+        <div class="form-group">
+            <label>Aplicación</label>
+            <select name="aplicacion_id" style="width: 100%; padding: 0.75rem 1rem; border: 2px solid #e8e0d8; border-radius: 12px; font-size: 1rem; background: #faf8f6;">
+                <option value="">🔍 Sin asignar</option>
+                {% for app in aplicaciones %}
+                <option value="{{ app.id }}" {% if credencial.aplicacion_id == app.id %}selected{% endif %}>
+                    [{{ app.codigo }}] {{ app.nombre }}
+                    {% if app.lider_nombre %} - {{ app.lider_nombre }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <small style="color: #999; font-size: 0.75rem;">
+                💡 Selecciona la aplicación a la que pertenece esta credencial
+            </small>
+        </div>
+
+        {% if credencial.tipo_autenticacion == 'password' %}
+        <div class="form-group">
+            <label>Nueva contraseña (dejar vacío para no cambiar)</label>
+            <input type="password" name="contrasena" placeholder="Ingresa nueva contraseña solo si deseas cambiarla">
+        </div>
+        <div style="background: #f8f4f0; padding: 0.8rem 1rem; border-radius: 12px; margin-bottom: 1rem;">
+            <span style="font-size: 0.85rem; color: #888;">🔒 La contraseña actual está encriptada</span>
+        </div>
+        {% else %}
+        <div class="form-group" style="border: 2px dashed var(--color-primary); border-radius: 12px; padding: 1.5rem; text-align: center; background: #faf8f6;">
+            <label style="cursor: pointer; display: block;">
+                <div style="font-size: 3rem; margin-bottom: 0.5rem;">📁</div>
+                <div style="font-weight: 500; color: var(--color-primary);">Seleccionar nuevo archivo .ppk (opcional)</div>
+                <div style="font-size: 0.85rem; color: #999; margin-top: 0.3rem;">Solo si quieres reemplazar el archivo actual</div>
+                <input type="file" name="archivo_ppk" accept=".ppk,.pem,.key" style="display: none;" id="fileInput" onchange="mostrarNombreArchivo()">
+            </label>
+            <div id="nombreArchivo" style="margin-top: 0.8rem; font-size: 0.9rem; color: var(--color-accent);"></div>
+        </div>
+        
+        {% if credencial.ruta_archivo_ppk %}
+        <div style="background: #e8f5e9; padding: 0.8rem 1rem; border-radius: 12px; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.85rem; color: #2e7d32;">📄 Archivo actual: {{ credencial.ruta_archivo_ppk.split('\\')[-1] }}</span>
+            <a href="{{ url_for('descargar_ppk', id=credencial.id) }}" class="btn btn-primary btn-sm">⬇️ Descargar</a>
+        </div>
+        {% endif %}
+        
+        <div style="text-align: center; margin: 1rem 0; color: #999;">— O edita el contenido manualmente —</div>
+        
+        <div class="form-group">
+            <label>Contenido de la llave privada</label>
+            <textarea name="llave_privada" rows="6" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;MIIEpAIBAAKCAQEA...&#10;-----END RSA PRIVATE KEY-----">{{ credencial.llave_privada or '' }}</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>Llave pública (opcional)</label>
+            <textarea name="llave_publica" rows="3" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ...">{{ credencial.llave_publica or '' }}</textarea>
+        </div>
+        {% endif %}
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">💾 Actualizar</button>
+            <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function mostrarNombreArchivo() {
+    const input = document.getElementById('fileInput');
+    const nombreDiv = document.getElementById('nombreArchivo');
+    if (input.files && input.files[0]) {
+        nombreDiv.innerHTML = '✅ Archivo seleccionado: <strong>' + input.files[0].name + '</strong> (' + (input.files[0].size / 1024).toFixed(1) + ' KB)';
+    } else {
+        nombreDiv.innerHTML = '';
+    }
+}
+</script>
+{% endblock %}

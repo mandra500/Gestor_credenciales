@@ -1,0 +1,159 @@
+<!-- templates/checkin_success.html -->
+{% extends "base.html" %}
+
+{% block page_title %}Check-in Exitoso{% endblock %}
+{% block breadcrumb %}Credenciales / <span>Check-in Exitoso</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 700px; margin: 0 auto; padding: 2rem; text-align: center;">
+    <div style="font-size: 4rem; margin-bottom: 1rem;">✅</div>
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">Check-in Exitoso</h2>
+    
+    <div style="background: #e8f5e9; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border-left: 4px solid #4caf50;">
+        <p style="color: #2e7d32; margin: 0;">
+            <strong>Ticket:</strong> {{ ticket_key }}
+        </p>
+        <p style="color: #2e7d32; margin: 0; font-size: 0.9rem;">
+            La sesión está siendo monitoreada. Al cerrar la sesión en el servidor, la contraseña se rotará automáticamente.
+        </p>
+    </div>
+    
+    <div style="background: #fff3cd; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; border: 2px dashed #ffc107;">
+        <h3 style="color: #856404; margin-bottom: 0.5rem;">🔑 Credenciales de acceso</h3>
+        <div style="text-align: left; font-family: monospace; font-size: 1.1rem; background: #f8f4f0; padding: 1rem; border-radius: 8px;">
+            <p><strong>Servidor:</strong> <span style="color: var(--color-primary);">{{ credencial.nombre_servidor }}</span></p>
+            <p><strong>IP:</strong> <span style="color: var(--color-primary);">{{ credencial.ip }}</span></p>
+            <p><strong>Usuario:</strong> <span style="color: var(--color-primary);">{{ credencial.usuario }}</span></p>
+            <p><strong>Contraseña:</strong> <span style="color: #d32f2f; font-weight: bold; font-size: 1.3rem;" id="passwordDisplay">{{ password }}</span></p>
+        </div>
+        <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; justify-content: center;">
+            <button onclick="copiarPassword()" class="btn btn-primary btn-sm" style="padding: 0.4rem 1.2rem;">
+                📋 Copiar contraseña
+            </button>
+            <button onclick="togglePassword()" class="btn btn-outline btn-sm" style="padding: 0.4rem 1.2rem;">
+                👁️ Mostrar/Ocultar
+            </button>
+        </div>
+    </div>
+    
+    <div style="background: #e3f2fd; padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; border-left: 4px solid #2196f3; text-align: left;">
+        <h4 style="color: #0d47a1; margin-bottom: 0.5rem;">📋 Instrucciones para conexión SSH</h4>
+        <ol style="color: #0d47a1; font-size: 0.9rem; padding-left: 1.2rem;">
+            <li>Conéctate al servidor usando la contraseña mostrada arriba</li>
+            <li>Realiza el trabajo necesario en el servidor</li>
+            <li>Cuando termines, cierra la sesión SSH (escribe <code>exit</code>)</li>
+            <li>La contraseña se rotará automáticamente y la sesión se cerrará</li>
+        </ol>
+    </div>
+    
+    <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem;">
+        <a href="{{ url_for('listar_credenciales') }}" class="btn btn-primary">📋 Volver a Credenciales</a>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline">📊 Dashboard</a>
+    </div>
+</div>
+
+<script>
+// ===== COPIAR CONTRASEÑA =====
+function copiarPassword() {
+    const password = document.getElementById('passwordDisplay').textContent;
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(password)
+            .then(() => mostrarNotificacion('✅ Contraseña copiada al portapapeles'))
+            .catch(() => copiarFallback(password));
+    } else {
+        copiarFallback(password);
+    }
+}
+
+function copiarFallback(texto) {
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        mostrarNotificacion('✅ Contraseña copiada al portapapeles');
+    } catch (e) {
+        mostrarNotificacion('❌ No se pudo copiar la contraseña');
+    }
+}
+
+// ===== MOSTRAR/OCULTAR CONTRASEÑA =====
+function togglePassword() {
+    const el = document.getElementById('passwordDisplay');
+    const current = el.textContent;
+    
+    if (current === '••••••••••••••') {
+        el.textContent = '{{ password }}';
+        mostrarNotificacion('👁️ Contraseña visible');
+    } else {
+        el.textContent = '••••••••••••••';
+        mostrarNotificacion('🔒 Contraseña oculta');
+    }
+}
+
+// ===== NOTIFICACIÓN =====
+function mostrarNotificacion(mensaje) {
+    const existing = document.querySelector('.custom-notification');
+    if (existing) existing.remove();
+    
+    const notificacion = document.createElement('div');
+    notificacion.className = 'custom-notification';
+    notificacion.textContent = mensaje;
+    notificacion.style.cssText = `
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--color-primary, #D4A373);
+        color: white;
+        padding: 0.8rem 2rem;
+        border-radius: 12px;
+        font-weight: 500;
+        box-shadow: 0 8px 30px rgba(212, 163, 115, 0.4);
+        z-index: 9999;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        max-width: 90%;
+        text-align: center;
+        animation: fadeInUp 0.3s ease;
+    `;
+    document.body.appendChild(notificacion);
+    
+    setTimeout(() => {
+        notificacion.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        notificacion.style.opacity = '0';
+        notificacion.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => {
+            if (notificacion.parentNode) {
+                document.body.removeChild(notificacion);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// Estilo para la notificación
+const styleNotif = document.createElement('style');
+styleNotif.textContent = `
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+`;
+document.head.appendChild(styleNotif);
+
+// ===== OCULTAR CONTRASEÑA POR DEFECTO =====
+document.addEventListener('DOMContentLoaded', function() {
+    const el = document.getElementById('passwordDisplay');
+    if (el) {
+        el.textContent = '••••••••••••••';
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Nueva Aplicación{% endblock %}
+{% block breadcrumb %}Configuración / Aplicaciones / <span>Nueva</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 700px; margin: 0 auto; padding: 2rem;">
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">➕ Nueva Aplicación</h2>
+    <p style="color: #999; font-size: 0.9rem; margin-bottom: 1.5rem;">Registra una nueva aplicación y asigna sus líderes técnicos</p>
+    
+    <form method="POST">
+        <!-- Datos de la aplicación -->
+        <h3 style="color: var(--color-text); margin-bottom: 1rem; font-size: 1rem; border-bottom: 2px solid var(--color-secondary); padding-bottom: 0.5rem;">📋 Datos de la Aplicación</h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1rem;">
+            <div class="form-group">
+                <label>Código <span style="color: red;">*</span></label>
+                <input type="text" name="codigo" required placeholder="Ej: RDD" style="text-transform: uppercase;">
+                <small style="color: #999; font-size: 0.7rem;">Siglas de la aplicación</small>
+            </div>
+            <div class="form-group">
+                <label>Nombre <span style="color: red;">*</span></label>
+                <input type="text" name="nombre" required placeholder="Ej: RDD">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Descripción</label>
+            <input type="text" name="descripcion" placeholder="Breve descripción de la aplicación">
+        </div>
+
+        <!-- Líder Principal -->
+        <h3 style="color: var(--color-text); margin: 1.5rem 0 1rem 0; font-size: 1rem; border-bottom: 2px solid var(--color-secondary); padding-bottom: 0.5rem;">👤 Líder Técnico Principal</h3>
+
+        <div class="form-group">
+            <label>Nombre completo <span style="color: red;">*</span></label>
+            <input type="text" name="lider_principal_nombre" required placeholder="Ej: Juan Pérez">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+                <label>Email <span style="color: red;">*</span></label>
+                <input type="email" name="lider_principal_email" required placeholder="juan.perez@empresa.com">
+            </div>
+            <div class="form-group">
+                <label>Teléfono <span style="color: red;">*</span></label>
+                <input type="text" name="lider_principal_telefono" required placeholder="+56 9 1234 5678">
+            </div>
+        </div>
+
+        <!-- ===== LÍDER ALTERNO CON TOGGLE ===== -->
+        <div style="display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0 1rem 0; border-bottom: 2px solid var(--color-secondary); padding-bottom: 0.5rem;">
+            <h3 style="color: var(--color-text); font-size: 1rem; margin: 0;">👤 Líder Técnico Alterno</h3>
+            <!-- Toggle Switch -->
+            <label class="switch" style="position: relative; display: inline-block; width: 48px; height: 26px; cursor: pointer;">
+                <input type="checkbox" id="toggleAlterno" onchange="toggleCamposAlterno()" style="opacity: 0; width: 0; height: 0;">
+                <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; transition: .3s; border-radius: 26px;">
+                    <span class="slider-ball" style="position: absolute; content: ''; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; transition: .3s; border-radius: 50%;"></span>
+                </span>
+            </label>
+            <span id="estadoAlterno" style="font-size: 0.85rem; color: #999;">Inactivo</span>
+        </div>
+
+        <!-- Campos del Líder Alterno (ocultos por defecto) -->
+        <div id="camposAlterno" style="display: none;">
+            <div class="form-group">
+                <label>Nombre completo</label>
+                <input type="text" name="lider_alterno_nombre" placeholder="Ej: María González">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="lider_alterno_email" placeholder="maria.gonzalez@empresa.com">
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" name="lider_alterno_telefono" placeholder="+56 9 8765 4321">
+                </div>
+            </div>
+        </div>
+
+        <!-- Mensaje "No aplica" -->
+        <div id="noAplicaAlterno" style="padding: 0.8rem 1rem; background: #f5f0eb; border-radius: 8px; color: #888; font-size: 0.9rem; text-align: center; margin-bottom: 1rem;">
+            ℹ️ No aplica - Solo líder técnico principal
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">💾 Guardar</button>
+            <a href="{{ url_for('listar_aplicaciones') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function toggleCamposAlterno() {
+    const toggle = document.getElementById('toggleAlterno');
+    const campos = document.getElementById('camposAlterno');
+    const noAplica = document.getElementById('noAplicaAlterno');
+    const estado = document.getElementById('estadoAlterno');
+    
+    if (toggle.checked) {
+        campos.style.display = 'block';
+        noAplica.style.display = 'none';
+        estado.textContent = 'Activo';
+        estado.style.color = '#4caf50';
+    } else {
+        campos.style.display = 'none';
+        noAplica.style.display = 'block';
+        estado.textContent = 'Inactivo';
+        estado.style.color = '#999';
+    }
+}
+
+// Estilos para el toggle
+document.addEventListener('DOMContentLoaded', function() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .switch input:checked + .slider {
+            background: #D4A373;
+        }
+        .switch input:checked + .slider .slider-ball {
+            transform: translateX(22px);
+        }
+    `;
+    document.head.appendChild(style);
+});
+</script>
+{% endblock %}

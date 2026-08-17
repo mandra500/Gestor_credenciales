@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Importar Aplicaciones{% endblock %}
+{% block breadcrumb %}Configuración / Aplicaciones / <span>Importar</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 700px; margin: 0 auto; padding: 2rem;">
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">📥 Importar Aplicaciones</h2>
+    <p style="color: #999; font-size: 0.9rem; margin-bottom: 1.5rem;">
+        Importa aplicaciones desde un archivo Excel con el siguiente formato:
+    </p>
+
+    <!-- Formato esperado (más compacto) -->
+    <div style="background: var(--color-secondary); padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; overflow-x: auto;">
+        <h4 style="color: var(--color-text); margin-bottom: 0.5rem; font-size: 0.95rem;">📋 Formato del archivo Excel</h4>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; min-width: 500px;">
+            <thead>
+                <tr style="background: var(--color-primary); color: white;">
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Código</th>
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Nombre</th>
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Descripción</th>
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Líder Técnico</th>
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Email</th>
+                    <th style="padding: 0.3rem 0.5rem; text-align: left; white-space: nowrap;">Teléfono</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: white;">
+                    <td style="padding: 0.3rem 0.5rem; font-weight: 600; white-space: nowrap;">RDD</td>
+                    <td style="padding: 0.3rem 0.5rem; white-space: nowrap;">RDD</td>
+                    <td style="padding: 0.3rem 0.5rem;">Aplicación RDD</td>
+                    <td style="padding: 0.3rem 0.5rem; white-space: nowrap;">Juan Pérez</td>
+                    <td style="padding: 0.3rem 0.5rem; font-size: 0.7rem;">juan@empresa.com</td>
+                    <td style="padding: 0.3rem 0.5rem; font-size: 0.7rem; white-space: nowrap;">+56 9 1234 5678</td>
+                </tr>
+                <tr style="background: #faf8f6;">
+                    <td style="padding: 0.3rem 0.5rem; font-weight: 600; white-space: nowrap;">SYN</td>
+                    <td style="padding: 0.3rem 0.5rem; white-space: nowrap;">Synergia</td>
+                    <td style="padding: 0.3rem 0.5rem;">Synergia 5.0</td>
+                    <td style="padding: 0.3rem 0.5rem; white-space: nowrap;">María López</td>
+                    <td style="padding: 0.3rem 0.5rem; font-size: 0.7rem;">maria@empresa.com</td>
+                    <td style="padding: 0.3rem 0.5rem; font-size: 0.7rem; white-space: nowrap;">+56 9 8765 4321</td>
+                </tr>
+            </tbody>
+        </table>
+        <small style="color: #666; font-size: 0.7rem; display: block; margin-top: 0.5rem;">
+            ⚠️ La primera fila debe ser el encabezado. El archivo debe ser .xlsx o .xls
+        </small>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group" style="border: 2px dashed var(--color-primary); border-radius: 12px; padding: 1.5rem; text-align: center; background: #faf8f6;">
+            <label style="cursor: pointer; display: block;">
+                <div style="font-size: 3rem; margin-bottom: 0.5rem;">📁</div>
+                <div style="font-weight: 500; color: var(--color-primary);">Seleccionar archivo Excel</div>
+                <div style="font-size: 0.85rem; color: #999; margin-top: 0.3rem;">Haz clic para buscar tu archivo .xlsx o .xls</div>
+                <input type="file" name="archivo_excel" accept=".xlsx,.xls" style="display: none;" id="fileInput" onchange="mostrarNombreArchivo()" required>
+            </label>
+            <div id="nombreArchivo" style="margin-top: 0.8rem; font-size: 0.9rem; color: var(--color-accent);"></div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem; flex-wrap: wrap;">
+            <button type="submit" class="btn btn-primary">📥 Importar</button>
+            <a href="{{ url_for('listar_aplicaciones') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+
+    <!-- Botón para descargar plantilla -->
+    <div style="margin-top: 1.5rem; text-align: center; border-top: 1px solid #e8e0d8; padding-top: 1.5rem;">
+        <p style="color: #999; font-size: 0.85rem;">¿No tienes una plantilla?</p>
+        <a href="{{ url_for('exportar_aplicaciones') }}" class="btn btn-outline btn-sm" style="padding: 0.4rem 1.2rem;">
+            📥 Descargar plantilla (exportar)
+        </a>
+    </div>
+</div>
+
+<script>
+function mostrarNombreArchivo() {
+    const input = document.getElementById('fileInput');
+    const nombreDiv = document.getElementById('nombreArchivo');
+    if (input.files && input.files[0]) {
+        nombreDiv.innerHTML = '✅ Archivo seleccionado: <strong>' + input.files[0].name + '</strong> (' + (input.files[0].size / 1024).toFixed(1) + ' KB)';
+    } else {
+        nombreDiv.innerHTML = '';
+    }
+}
+</script>
+{% endblock %}

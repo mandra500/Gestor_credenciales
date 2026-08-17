@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+{% block breadcrumb %}Inicio / <span>Panel de Control</span>{% endblock %}
+
+<!-- ===== OCULTAR NAVEGACIÓN RÁPIDA ===== -->
+{% block nav_buttons %}{% endblock %}
+
+{% block content %}
+
+<!-- ===== TARJETAS DE ESTADÍSTICAS ===== -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+    
+    <!-- Total Credenciales -->
+    <div class="card" style="text-align: center; padding: 1.5rem; border-top: 4px solid var(--color-primary);">
+        <div style="font-size: 2.5rem; margin-bottom: 0.3rem;">🔐</div>
+        <div style="font-size: 2rem; font-weight: 700; color: var(--color-text);">{{ total_credenciales }}</div>
+        <div style="font-size: 0.85rem; color: #999;">Total Credenciales</div>
+    </div>
+
+    <!-- Total Aplicaciones -->
+    <div class="card" style="text-align: center; padding: 1.5rem; border-top: 4px solid #2196f3;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.3rem;">📱</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #2196f3;">{{ total_aplicaciones }}</div>
+        <div style="font-size: 0.85rem; color: #999;">Total Aplicaciones</div>
+    </div>
+
+    <!-- Total Usuarios -->
+    <div class="card" style="text-align: center; padding: 1.5rem; border-top: 4px solid #4caf50;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.3rem;">👥</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #4caf50;">{{ total_usuarios }}</div>
+        <div style="font-size: 0.85rem; color: #999;">Total Usuarios</div>
+    </div>
+</div>
+
+<!-- ===== GRÁFICO DE CREDENCIALES POR MES ===== -->
+<div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <h3 style="color: var(--color-text); display: flex; align-items: center; gap: 0.5rem;">
+                <span>📊</span> Credenciales por Mes
+            </h3>
+            <p style="color: #999; font-size: 0.85rem;">Distribución de credenciales creadas por mes</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <label style="font-size: 0.85rem; color: #666;">Desde:</label>
+            <input type="date" id="fechaDesde" style="padding: 0.3rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.85rem;">
+            <label style="font-size: 0.85rem; color: #666;">Hasta:</label>
+            <input type="date" id="fechaHasta" style="padding: 0.3rem 0.6rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.85rem;">
+            <button onclick="actualizarGrafico()" class="btn btn-primary btn-sm" style="padding: 0.3rem 1rem;">Filtrar</button>
+            <button onclick="resetearFiltro()" class="btn btn-outline btn-sm" style="padding: 0.3rem 1rem;">Resetear</button>
+        </div>
+    </div>
+    
+    <!-- Contenedor del gráfico -->
+    <div style="width: 100%; height: 350px; position: relative;">
+        <canvas id="graficoCredenciales"></canvas>
+    </div>
+    
+    <!-- Resumen de totales por mes -->
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f0ebe5;">
+        <div style="font-size: 0.85rem; color: #666;">
+            <strong>Total período:</strong> <span id="totalPeriodo">0</span> credenciales
+        </div>
+        <div style="font-size: 0.85rem; color: #666;">
+            <strong>Mes con más:</strong> <span id="mesMaximo">-</span>
+        </div>
+        <div style="font-size: 0.85rem; color: #666;">
+            <strong>Promedio mensual:</strong> <span id="promedioMensual">0</span>
+        </div>
+    </div>
+</div>
+
+<!-- ===== DOS COLUMNAS ===== -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+
+    <!-- Últimas Credenciales Creadas -->
+    <div class="card" style="padding: 1.5rem;">
+        <h3 style="color: var(--color-text); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🆕</span> Últimas Creadas
+        </h3>
+        {% if ultimas_credenciales %}
+            <ul style="list-style: none; padding: 0;">
+                {% for cred in ultimas_credenciales %}
+                <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid #f0ebe5;">
+                    <div>
+                        <strong style="font-size: 0.9rem;">{{ cred.nombre_servidor }}</strong>
+                        <div style="font-size: 0.75rem; color: #999;">
+                            👤 {{ cred.usuario }} · 
+                            {% if cred.tipo_autenticacion == 'password' %}🔑{% else %}🔐{% endif %}
+                            {{ cred.tipo_autenticacion }}
+                        </div>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #bbb; text-align: right;">
+                        {{ cred.fecha_creacion.strftime('%d/%m/%Y') }}
+                        <br>{{ cred.fecha_creacion.strftime('%H:%M') }}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p style="color: #999; text-align: center; padding: 1rem;">No hay credenciales creadas</p>
+        {% endif %}
+    </div>
+
+    <!-- Últimas Credenciales Actualizadas -->
+    <div class="card" style="padding: 1.5rem;">
+        <h3 style="color: var(--color-text); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>📝</span> Últimas Actualizadas
+        </h3>
+        {% if ultimas_actualizadas %}
+            <ul style="list-style: none; padding: 0;">
+                {% for cred in ultimas_actualizadas %}
+                <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid #f0ebe5;">
+                    <div>
+                        <strong style="font-size: 0.9rem;">{{ cred.nombre_servidor }}</strong>
+                        <div style="font-size: 0.75rem; color: #999;">
+                            👤 {{ cred.usuario }} · 
+                            {% if cred.tipo_autenticacion == 'password' %}🔑{% else %}🔐{% endif %}
+                            {{ cred.tipo_autenticacion }}
+                        </div>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #bbb; text-align: right;">
+                        {{ cred.fecha_actualizacion.strftime('%d/%m/%Y') }}
+                        <br>{{ cred.fecha_actualizacion.strftime('%H:%M') }}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p style="color: #999; text-align: center; padding: 1rem;">No hay credenciales actualizadas</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===== ACCESO RÁPIDO ===== -->
+<div class="card" style="padding: 1.5rem; margin-top: 1.5rem; text-align: center;">
+    <h3 style="color: var(--color-text); margin-bottom: 1rem;">⚡ Acceso Rápido</h3>
+    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+        <a href="{{ url_for('agregar') }}" class="btn btn-primary">➕ Nueva Credencial</a>
+        <a href="{{ url_for('listar_credenciales') }}" class="btn btn-outline">📋 Ver Todas</a>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// ===== DATOS DEL GRÁFICO =====
+const datosOriginales = {{ datos_json|safe }};
+
+// ===== INICIALIZAR GRÁFICO =====
+let miGrafico = null;
+let datosActuales = [...datosOriginales];
+
+function crearGrafico(datos) {
+    const ctx = document.getElementById('graficoCredenciales').getContext('2d');
+    
+    if (miGrafico) {
+        miGrafico.destroy();
+    }
+    
+    if (datos.length === 0) {
+        const container = ctx.canvas.parentElement;
+        container.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #999; text-align: center;">
+                <div style="font-size: 4rem; margin-bottom: 1rem;">📊</div>
+                <p style="font-size: 1.1rem;">No hay datos de credenciales para mostrar</p>
+                <p style="font-size: 0.85rem;">Comienza agregando tu primera credencial</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const meses = datos.map(d => d.mes_nombre);
+    const cantidades = datos.map(d => d.cantidad);
+    
+    const total = cantidades.reduce((a, b) => a + b, 0);
+    const maxValor = Math.max(...cantidades, 0);
+    const mesMax = datos.find(d => d.cantidad === maxValor);
+    const promedio = datos.length > 0 ? (total / datos.length).toFixed(1) : 0;
+    
+    document.getElementById('totalPeriodo').textContent = total;
+    document.getElementById('mesMaximo').textContent = mesMax ? `${mesMax.mes_nombre} (${mesMax.cantidad})` : '-';
+    document.getElementById('promedioMensual').textContent = promedio;
+    
+    miGrafico = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: meses,
+            datasets: [{
+                label: 'Credenciales creadas',
+                data: cantidades,
+                backgroundColor: 'rgba(212, 163, 115, 0.7)',
+                borderColor: '#D4A373',
+                borderWidth: 2,
+                borderRadius: 6,
+                hoverBackgroundColor: 'rgba(212, 163, 115, 0.9)',
+                hoverBorderColor: '#CC8B5C',
+                hoverBorderWidth: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(60, 44, 30, 0.9)',
+                    titleColor: '#FAEDCD',
+                    bodyColor: '#FFFFFF',
+                    cornerRadius: 8,
+                    padding: 10,
+                    callbacks: {
+                        label: function(context) {
+                            return context.parsed.y + ' credenciales';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        color: '#999'
+                    },
+                    grid: {
+                        color: 'rgba(0,0,0,0.05)'
+                    }
+                },
+                x: {
+                    ticks: {
+                        color: '#999',
+                        maxRotation: 45,
+                        minRotation: 30
+                    },
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ===== FILTRAR POR FECHAS =====
+function actualizarGrafico() {
+    const desde = document.getElementById('fechaDesde').value;
+    const hasta = document.getElementById('fechaHasta').value;
+    
+    if (!desde || !hasta) {
+        mostrarNotificacion('⚠️ Selecciona ambas fechas para filtrar');
+        return;
+    }
+    
+    const desdeObj = new Date(desde);
+    const hastaObj = new Date(hasta);
+    
+    if (desdeObj > hastaObj) {
+        mostrarNotificacion('⚠️ La fecha "Desde" no puede ser mayor que "Hasta"');
+        return;
+    }
+    
+    const datosFiltrados = datosOriginales.filter(d => {
+        const fecha = new Date(d.mes + '-01');
+        return fecha >= desdeObj && fecha <= hastaObj;
+    });
+    
+    datosActuales = datosFiltrados;
+    crearGrafico(datosFiltrados);
+    mostrarNotificacion('✅ Gráfico actualizado con el filtro de fechas');
+}
+
+// ===== RESETEAR FILTRO =====
+function resetearFiltro() {
+    document.getElementById('fechaDesde').value = '';
+    document.getElementById('fechaHasta').value = '';
+    datosActuales = [...datosOriginales];
+    crearGrafico(datosOriginales);
+    mostrarNotificacion('🔄 Filtro reseteado');
+}
+
+// ===== NOTIFICACIÓN =====
+function mostrarNotificacion(mensaje) {
+    const existing = document.querySelector('.custom-notification');
+    if (existing) existing.remove();
+    
+    const notificacion = document.createElement('div');
+    notificacion.className = 'custom-notification';
+    notificacion.textContent = mensaje;
+    notificacion.style.cssText = `
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--color-primary, #D4A373);
+        color: white;
+        padding: 0.8rem 2rem;
+        border-radius: 12px;
+        font-weight: 500;
+        box-shadow: 0 8px 30px rgba(212, 163, 115, 0.4);
+        z-index: 9999;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        max-width: 90%;
+        text-align: center;
+        animation: fadeInUp 0.3s ease;
+    `;
+    document.body.appendChild(notificacion);
+    
+    setTimeout(() => {
+        notificacion.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        notificacion.style.opacity = '0';
+        notificacion.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => {
+            if (notificacion.parentNode) {
+                document.body.removeChild(notificacion);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// ===== ESTILO PARA LA NOTIFICACIÓN =====
+const styleNotif = document.createElement('style');
+styleNotif.textContent = `
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+`;
+document.head.appendChild(styleNotif);
+
+// ===== INICIALIZAR =====
+document.addEventListener('DOMContentLoaded', function() {
+    crearGrafico(datosOriginales);
+});
+</script>
+{% endblock %}

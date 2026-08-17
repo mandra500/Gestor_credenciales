@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard - Mis Credenciales{% endblock %}
+{% block breadcrumb %}Inicio / <span>Mis Credenciales</span>{% endblock %}
+
+{% block content %}
+    {% if credenciales %}
+        <div class="credencial-grid">
+            {% for credencial in credenciales %}
+            <div class="credencial-item">
+                <h3>{{ credencial.nombre_servidor }}</h3>
+
+                <!-- ===== APLICACIÓN ===== -->
+                {% if credencial.aplicacion %}
+                <div style="margin: 0.3rem 0; display: flex; align-items: center; gap: 0.3rem;">
+                    <span style="background: var(--color-primary); color: white; padding: 0.1rem 0.6rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">
+                        {{ credencial.aplicacion.codigo }}
+                    </span>
+                    <span style="font-size: 0.75rem; color: #888;">{{ credencial.aplicacion.nombre }}</span>
+                </div>
+                {% else %}
+                <div style="margin: 0.3rem 0;">
+                    <span style="font-size: 0.7rem; color: #bbb;">⚠️ Sin aplicación asignada</span>
+                </div>
+                {% endif %}
+                
+                <!-- IP con botón copiar -->
+                <div style="font-size: 0.85rem; color: var(--color-accent); margin: 0.3rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>🌐</span>
+                    <span style="font-family: monospace; background: #f5f0eb; padding: 0.1rem 0.5rem; border-radius: 6px;" id="ip_{{ credencial.id }}">{{ credencial.ip }}</span>
+                    <button onclick="copiarTexto('ip_{{ credencial.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: var(--color-primary);" title="Copiar IP">📋</button>
+                </div>
+                
+                <div class="descripcion">{{ credencial.descripcion or 'Sin descripción' }}</div>
+                
+                <!-- Usuario con botón copiar -->
+                <div style="margin: 0.6rem 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <span class="badge">
+                        {% if credencial.tipo_autenticacion == 'password' %}
+                            🔑 Contraseña
+                        {% else %}
+                            🔐 Llave SSH
+                        {% endif %}
+                    </span>
+                    <span class="usuario" id="usuario_{{ credencial.id }}">👤 {{ credencial.usuario }}</span>
+                    <button onclick="copiarTextoUsuario('{{ credencial.usuario }}')" style="background: none; border: none; cursor: pointer; font-size: 0.8rem; color: var(--color-primary);" title="Copiar usuario">📋</button>
+                </div>
+                
+                <!-- Contraseña (solo para tipo password) -->
+                {% if credencial.tipo_autenticacion == 'password' %}
+                <div style="margin: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem; background: #f8f4f0; padding: 0.4rem 0.8rem; border-radius: 8px;">
+                    <span style="font-size: 0.85rem; color: #666;">🔑</span>
+                    <span id="password_{{ credencial.id }}" style="font-family: monospace; font-size: 0.9rem; flex: 1;">
+                        ••••••••
+                    </span>
+                    <button onclick="verPassword('{{ credencial.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: var(--color-primary);" title="Mostrar contraseña">👁️</button>
+                    <button onclick="copiarPassword('{{ credencial.id }}')" style="background: none; border: none; cursor: pointer; font-size: 0.9rem; color: var(--color-primary);" title="Copiar contraseña">📋</button>
+                </div>
+                {% endif %}
+                
+                {% if credencial.tipo_autenticacion == 'llave' and credencial.ruta_archivo_ppk %}
+                <div style="font-size: 0.8rem; color: #2e7d32; margin: 0.3rem 0;">
+                    📄 .ppk asociado
+                </div>
+                {% endif %}
+
+                <div class="acciones">
+                    <a href="{{ url_for('editar', id=credencial.id) }}" class="btn btn-outline btn-sm">✏️ Editar</a>
+                    {% if credencial.tipo_autenticacion == 'llave' and credencial.ruta_archivo_ppk %}
+                    <a href="{{ url_for('descargar_ppk', id=credencial.id) }}" class="btn btn-primary btn-sm">⬇️ .ppk</a>
+                    {% endif %}
+                    <form action="{{ url_for('eliminar', id=credencial.id) }}" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('¿Seguro que quieres eliminar esta credencial?')">🗑️</button>
+                    </form>
+                </div>
+                
+                <div class="fecha">
+                    📅 {{ credencial.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="card" style="text-align: center; padding: 3rem 2rem;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">📭</div>
+            <h3 style="color: #999; font-weight: 400;">No hay credenciales guardadas</h3>
+            <p style="color: #bbb; margin: 0.5rem 0 1.5rem 0;">Comienza agregando tu primera credencial</p>
+            <a href="{{ url_for('agregar') }}" class="btn btn-primary">➕ Agregar credencial</a>
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+console.log('✅ Scripts de credenciales cargados');
+
+// ===== VER CONTRASEÑA =====
+function verPassword(id) {
+    console.log('🔍 Ver contraseña para ID:', id);
+    const span = document.getElementById('password_' + id);
+    
+    if (!span) {
+        mostrarNotificacion('❌ Error al encontrar la contraseña');
+        return;
+    }
+    
+    const btn = span.parentElement.querySelector('button:first-of-type');
+    
+    // Si está oculta, mostrarla
+    if (span.textContent === '••••••••') {
+        console.log('📤 Solicitando contraseña al servidor...');
+        
+        fetch('/obtener-contrasena/' + id)
+            .then(response => {
+                console.log('📥 Respuesta recibida, status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('📦 Datos recibidos:', data);
+                if (data.contrasena) {
+                    span.textContent = data.contrasena;
+                    if (btn) btn.textContent = '🙈';
+                    mostrarNotificacion('👁️ Contraseña visible por 10 segundos');
+                    // Auto-ocultar después de 10 segundos
+                    setTimeout(() => {
+                        span.textContent = '••••••••';
+                        if (btn) btn.textContent = '👁️';
+                    }, 10000);
+                } else {
+                    console.error('❌ Error en datos:', data.error);
+                    if (data.sugerencia) {
+                        mostrarNotificacion('⚠️ ' + data.error + ' - ' + data.sugerencia);
+                        // Redirigir a editar después de 2 segundos
+                        setTimeout(() => {
+                            window.location.href = '/editar/' + id;
+                        }, 3000);
+                    } else {
+                        mostrarNotificacion('⚠️ ' + (data.error || 'No se pudo obtener la contraseña'));
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error en fetch:', error);
+                mostrarNotificacion('❌ Error al obtener la contraseña');
+            });
+    } else {
+        // Si está visible, ocultarla
+        span.textContent = '••••••••';
+        if (btn) btn.textContent = '👁️';
+        mostrarNotificacion('🔒 Contraseña oculta');
+    }
+}
+
+// ===== COPIAR CONTRASEÑA =====
+function copiarPassword(id) {
+    console.log('📋 Copiar contraseña para ID:', id);
+    const span = document.getElementById('password_' + id);
+    
+    if (!span) {
+        mostrarNotificacion('❌ Error al encontrar la contraseña');
+        return;
+    }
+    
+    const copiar = (texto) => {
+        console.log('📝 Copiando texto...');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(texto)
+                .then(() => {
+                    console.log('✅ Copiado exitosamente');
+                    mostrarNotificacion('✅ Contraseña copiada al portapapeles');
+                })
+                .catch((err) => {
+                    console.warn('⚠️ Clipboard falló, usando fallback:', err);
+                    copiarFallback(texto);
+                });
+        } else {
+            console.warn('⚠️ Clipboard no disponible, usando fallback');
+            copiarFallback(texto);
+        }
+    };
+    
+    // Si la contraseña está oculta, obtenerla primero
+    if (span.textContent === '••••••••') {
+        console.log('📤 Solicitando contraseña para copiar...');
+        fetch('/obtener-contrasena/' + id)
+            .then(response => {
+                console.log('📥 Respuesta recibida, status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('📦 Datos recibidos:', data);
+                if (data.contrasena) {
+                    copiar(data.contrasena);
+                } else {
+                    console.error('❌ Error en datos:', data.error);
+                    if (data.sugerencia) {
+                        mostrarNotificacion('⚠️ ' + data.error + ' - ' + data.sugerencia);
+                        setTimeout(() => {
+                            window.location.href = '/editar/' + id;
+                        }, 3000);
+                    } else {
+                        mostrarNotificacion('⚠️ ' + (data.error || 'No se pudo obtener la contraseña'));
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error en fetch:', error);
+                mostrarNotificacion('❌ Error al obtener la contraseña');
+            });
+    } else {
+        // Si está visible, copiar directamente
+        copiar(span.textContent);
+    }
+}
+
+// ===== COPIAR CON FALLBACK =====
+function copiarFallback(texto) {
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        textarea.style.width = '1px';
+        textarea.style.height = '1px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (success) {
+            console.log('✅ Copiado exitosamente con fallback');
+            mostrarNotificacion('✅ Contraseña copiada al portapapeles');
+        } else {
+            console.error('❌ Fallback también falló');
+            mostrarNotificacion('❌ No se pudo copiar');
+        }
+    } catch (e) {
+        console.error('❌ Error en copiarFallback:', e);
+        mostrarNotificacion('❌ No se pudo copiar');
+    }
+}
+
+// ===== COPIAR TEXTO (IP) =====
+function copiarTexto(elementId) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        mostrarNotificacion('❌ No se encontró el elemento');
+        return;
+    }
+    const texto = element.textContent.trim();
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto)
+            .then(() => mostrarNotificacion('✅ IP copiada al portapapeles'))
+            .catch(() => copiarFallbackSimple(texto, 'IP'));
+    } else {
+        copiarFallbackSimple(texto, 'IP');
+    }
+}
+
+// ===== COPIAR USUARIO =====
+function copiarTextoUsuario(usuario) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(usuario)
+            .then(() => mostrarNotificacion('✅ Usuario copiado al portapapeles'))
+            .catch(() => copiarFallbackSimple(usuario, 'Usuario'));
+    } else {
+        copiarFallbackSimple(usuario, 'Usuario');
+    }
+}
+
+// ===== COPIAR FALLBACK SIMPLE =====
+function copiarFallbackSimple(texto, tipo) {
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        mostrarNotificacion('✅ ' + tipo + ' copiado al portapapeles');
+    } catch (e) {
+        mostrarNotificacion('❌ No se pudo copiar');
+    }
+}
+
+// ===== NOTIFICACIÓN TEMPORAL =====
+function mostrarNotificacion(mensaje) {
+    // Eliminar notificaciones anteriores
+    const existing = document.querySelector('.custom-notification');
+    if (existing) existing.remove();
+    
+    const notificacion = document.createElement('div');
+    notificacion.className = 'custom-notification';
+    notificacion.textContent = mensaje;
+    notificacion.style.cssText = `
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--color-primary, #D4A373);
+        color: white;
+        padding: 0.8rem 2rem;
+        border-radius: 12px;
+        font-weight: 500;
+        box-shadow: 0 8px 30px rgba(212, 163, 115, 0.4);
+        z-index: 9999;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        max-width: 90%;
+        text-align: center;
+        animation: fadeInUp 0.3s ease;
+    `;
+    document.body.appendChild(notificacion);
+    
+    // Eliminar después de 3 segundos
+    setTimeout(() => {
+        notificacion.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        notificacion.style.opacity = '0';
+        notificacion.style.transform = 'translateX(-50%) translateY(20px)';
+        setTimeout(() => {
+            if (notificacion.parentNode) {
+                document.body.removeChild(notificacion);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// ===== ESTILO PARA LA NOTIFICACIÓN =====
+const styleNotif = document.createElement('style');
+styleNotif.textContent = `
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    }
+`;
+document.head.appendChild(styleNotif);
+
+console.log('✅ Scripts cargados correctamente');
+</script>
+{% endblock %}

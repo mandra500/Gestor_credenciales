@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuración - Editar Usuario{% endblock %}
+{% block breadcrumb %}Configuración / Usuarios / <span>Editar</span>{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 500px; margin: 0 auto; padding: 2rem;">
+    <h2 style="color: var(--color-primary); margin-bottom: 0.5rem;">✏️ Editar Usuario</h2>
+    <p style="color: #999; font-size: 0.9rem; margin-bottom: 1.5rem;">Actualiza los datos del usuario</p>
+    
+    <form method="POST">
+        <div class="form-group">
+            <label>Nombre completo *</label>
+            <input type="text" name="nombre" required value="{{ usuario.nombre }}">
+        </div>
+
+        <div class="form-group">
+            <label>Email *</label>
+            <input type="email" name="email" required value="{{ usuario.email }}">
+            <small style="color: #999; font-size: 0.7rem;">El email será usado para iniciar sesión</small>
+        </div>
+
+        <div class="form-group">
+            <label>Nueva contraseña (opcional)</label>
+            <input type="password" name="contrasena" placeholder="Dejar vacío para no cambiar" minlength="6">
+            <small style="color: #999; font-size: 0.7rem;">Solo completa este campo si quieres cambiar la contraseña</small>
+        </div>
+
+        <div class="form-group" style="margin-top: 0.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="es_admin" {% if usuario.es_admin %}checked{% endif %}>
+                Usuario Administrador
+            </label>
+            <small style="color: #999; font-size: 0.7rem;">Los administradores pueden gestionar usuarios y aplicaciones</small>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit" class="btn btn-primary">💾 Actualizar</button>
+            <a href="{{ url_for('listar_usuarios') }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

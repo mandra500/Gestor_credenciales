@@ -1,0 +1,1906 @@
+import jwt
+from functools import wraps
+from datetime import datetime, timedelta
+import sqlite3
+import shutil
+import zipfile
+import threading
+import time
+import requests
+from requests.auth import HTTPBasicAuth
+from secrets import token_urlsafe
+
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, make_response
+from database import db, bcrypt, Usuario, Credencial, Aplicacion, LiderTecnico, LogAuditoria, BackupConfig, BackupLog, Ticket, SesionCredencial, RotacionContrasena, encriptar_contrasena, desencriptar_contrasena
+import os
+from werkzeug.utils import secure_filename
+import pandas as pd
+import json
+
+# ============ IMPORTACIONES PARA CORREO ============
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from itsdangerous import URLSafeTimedSerializer
+
+# Crear la aplicación Flask
+app = Flask(__name__)
+
+# Configuraciones
+app.config['SECRET_KEY'] = 'MandragoraAire#2026'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///credenciales.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Configuración para subida de archivos
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB máximo
+app.config['ALLOWED_EXTENSIONS'] = {'ppk', 'pem', 'key', 'txt'}
+
+# ============ CONFIGURACIÓN JWT ============
+app.config['JWT_SECRET_KEY'] = 'MandragoraAire#2026-JWT-Secret'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
+
+# ============ CONFIGURACIÓN DE CORREO ============
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'tu_email@gmail.com'
+app.config['MAIL_PASSWORD'] = 'tu_contraseña_app'
+app.config['MAIL_DEFAULT_SENDER'] = 'tu_email@gmail.com'
+
+# ============ CONFIGURACIÓN DE JIRA ============
+app.config['JIRA_URL'] = os.environ.get('JIRA_URL', 'https://tu-empresa.atlassian.net')
+app.config['JIRA_EMAIL'] = os.environ.get('JIRA_EMAIL', 'tu-email@empresa.com')
+app.config['JIRA_API_TOKEN'] = os.environ.get('JIRA_API_TOKEN', 'tu-api-token')
+app.config['JIRA_PROJECT_KEY'] = os.environ.get('JIRA_PROJECT_KEY', 'PROY')
+
+# Crear carpeta de uploads si no existe
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Inicializar base de datos y bcrypt
+db.init_app(app)
+bcrypt.init_app(app)
+
+# ============ FUNCIONES JWT ============
+
+def generar_token(usuario_id):
+    payload = {
+        'usuario_id': usuario_id,
+        'exp': datetime.utcnow() + app.config['JWT_ACCESS_TOKEN_EXPIRES'],
+        'iat': datetime.utcnow()
+    }
+    token = jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm='HS256')
+    return token
+
+def verificar_token(token):
+    try:
+        payload = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        else:
+            token = request.cookies.get('access_token')
+        
+        if not token:
+            flash('🔐 Por favor, inicia sesión para acceder', 'warning')
+            return redirect(url_for('login'))
+        
+        payload = verificar_token(token)
+        if not payload:
+            flash('🔐 Sesión expirada. Por favor, inicia sesión nuevamente', 'warning')
+            return redirect(url_for('login'))
+        
+        usuario = Usuario.query.get(payload['usuario_id'])
+        if not usuario:
+            flash('❌ Usuario no encontrado', 'error')
+            return redirect(url_for('login'))
+        
+        return f(usuario, *args, **kwargs)
+    
+    return decorated
+
+# ============ FUNCIONES DE AUDITORÍA ============
+
+def registrar_log(usuario_id, accion, entidad, entidad_id=None, detalles=None):
+    try:
+        log = LogAuditoria(
+            usuario_id=usuario_id,
+            accion=accion,
+            entidad=entidad,
+            entidad_id=entidad_id,
+            detalles=detalles,
+            ip=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', '')[:200]
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        print(f"❌ Error al registrar log: {e}")
+        db.session.rollback()
+
+def log_creacion(usuario_id, entidad, entidad_id, detalles=None):
+    registrar_log(usuario_id, 'crear', entidad, entidad_id, detalles)
+
+def log_edicion(usuario_id, entidad, entidad_id, detalles=None):
+    registrar_log(usuario_id, 'editar', entidad, entidad_id, detalles)
+
+def log_eliminacion(usuario_id, entidad, entidad_id, detalles=None):
+    registrar_log(usuario_id, 'eliminar', entidad, entidad_id, detalles)
+
+def log_login(usuario_id):
+    registrar_log(usuario_id, 'login', 'usuario', usuario_id, 'Inicio de sesión')
+
+def log_logout(usuario_id):
+    registrar_log(usuario_id, 'logout', 'usuario', usuario_id, 'Cierre de sesión')
+
+# ============ FUNCIONES DE BACKUP ============
+
+def get_backup_config():
+    config = BackupConfig.query.first()
+    if not config:
+        config = BackupConfig()
+        db.session.add(config)
+        db.session.commit()
+    return config
+
+def crear_backup_full():
+    try:
+        config = get_backup_config()
+        os.makedirs(config.carpeta_destino, exist_ok=True)
+        
+        fecha_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        nombre_archivo = f"backup_full_{fecha_str}.db"
+        ruta_archivo = os.path.join(config.carpeta_destino, nombre_archivo)
+        
+        db_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
+        shutil.copy2(db_path, ruta_archivo)
+        
+        zip_path = ruta_archivo + '.zip'
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(ruta_archivo, os.path.basename(ruta_archivo))
+        
+        os.remove(ruta_archivo)
+        
+        tamaño = os.path.getsize(zip_path)
+        log = BackupLog(
+            tipo='full',
+            archivo=os.path.basename(zip_path),
+            tamaño=tamaño,
+            estado='exitoso'
+        )
+        db.session.add(log)
+        
+        config.ultimo_backup_full = datetime.utcnow()
+        db.session.commit()
+        
+        limpiar_backups_antiguos()
+        
+        print(f"✅ Backup full creado: {zip_path}")
+        return True, zip_path
+    except Exception as e:
+        log = BackupLog(
+            tipo='full',
+            estado='fallido',
+            mensaje=str(e)
+        )
+        db.session.add(log)
+        db.session.commit()
+        print(f"❌ Error en backup full: {e}")
+        return False, str(e)
+
+def crear_backup_incremental():
+    try:
+        config = get_backup_config()
+        
+        if not config.ultimo_backup_full:
+            crear_backup_full()
+            return True, "Backup full creado como base"
+        
+        os.makedirs(config.carpeta_destino, exist_ok=True)
+        
+        fecha_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        nombre_archivo = f"backup_inc_{fecha_str}.db"
+        ruta_archivo = os.path.join(config.carpeta_destino, nombre_archivo)
+        
+        db_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
+        
+        conn = sqlite3.connect(db_path)
+        backup_conn = sqlite3.connect(ruta_archivo)
+        conn.backup(backup_conn)
+        backup_conn.close()
+        conn.close()
+        
+        zip_path = ruta_archivo + '.zip'
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(ruta_archivo, os.path.basename(ruta_archivo))
+        
+        os.remove(ruta_archivo)
+        
+        tamaño = os.path.getsize(zip_path)
+        log = BackupLog(
+            tipo='incremental',
+            archivo=os.path.basename(zip_path),
+            tamaño=tamaño,
+            estado='exitoso'
+        )
+        db.session.add(log)
+        
+        config.ultimo_backup_incremental = datetime.utcnow()
+        db.session.commit()
+        
+        limpiar_backups_antiguos()
+        
+        print(f"✅ Backup incremental creado: {zip_path}")
+        return True, zip_path
+    except Exception as e:
+        log = BackupLog(
+            tipo='incremental',
+            estado='fallido',
+            mensaje=str(e)
+        )
+        db.session.add(log)
+        db.session.commit()
+        print(f"❌ Error en backup incremental: {e}")
+        return False, str(e)
+
+def limpiar_backups_antiguos():
+    config = get_backup_config()
+    try:
+        archivos = []
+        for f in os.listdir(config.carpeta_destino):
+            if f.endswith('.zip') and (f.startswith('backup_full_') or f.startswith('backup_inc_')):
+                ruta = os.path.join(config.carpeta_destino, f)
+                archivos.append((ruta, os.path.getctime(ruta)))
+        
+        archivos.sort(key=lambda x: x[1], reverse=True)
+        
+        if len(archivos) > config.max_backups:
+            for ruta, _ in archivos[config.max_backups:]:
+                os.remove(ruta)
+                print(f"🗑️ Backup antiguo eliminado: {ruta}")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error al limpiar backups: {e}")
+        return False
+
+def ejecutar_backup_programado():
+    with app.app_context():
+        config = get_backup_config()
+        
+        if not config.activo:
+            return
+        
+        ahora = datetime.utcnow()
+        
+        if config.ultimo_backup_full:
+            dias_desde_full = (ahora - config.ultimo_backup_full).days
+        else:
+            dias_desde_full = config.frecuencia_full + 1
+        
+        if dias_desde_full >= config.frecuencia_full:
+            crear_backup_full()
+        
+        elif config.ultimo_backup_incremental:
+            dias_desde_inc = (ahora - config.ultimo_backup_incremental).days
+        else:
+            dias_desde_inc = config.frecuencia_incremental + 1
+        
+        if dias_desde_inc >= config.frecuencia_incremental:
+            crear_backup_incremental()
+        
+        db.session.commit()
+
+def iniciar_planificador_backups():
+    def planificador():
+        while True:
+            try:
+                time.sleep(3600)
+                with app.app_context():
+                    ejecutar_backup_programado()
+            except Exception as e:
+                print(f"❌ Error en planificador de backups: {e}")
+    
+    hilo = threading.Thread(target=planificador, daemon=True)
+    hilo.start()
+    print("🔄 Planificador de backups iniciado")
+
+# ============ FUNCIONES DE CORREO ============
+
+def generar_token_invitacion(email):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt='invitacion')
+
+def verificar_token_invitacion(token, expiration=86400):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = serializer.loads(token, salt='invitacion', max_age=expiration)
+        return email
+    except:
+        return None
+
+def enviar_correo_invitacion(email, nombre, token):
+    try:
+        link_aceptar = f"{request.host_url}aceptar-invitacion/{token}"
+        
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = '🔐 Invitación al Gestor de Credenciales'
+        msg['From'] = app.config['MAIL_DEFAULT_SENDER']
+        msg['To'] = email
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; color: #3D2C1E; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; background: #FFF8F0; border-radius: 16px; }}
+                .header {{ text-align: center; padding: 20px 0; }}
+                .header h1 {{ color: #D4A373; }}
+                .content {{ background: white; padding: 30px; border-radius: 12px; }}
+                .btn {{
+                    display: inline-block;
+                    padding: 12px 30px;
+                    background: #D4A373;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 50px;
+                    font-weight: 500;
+                    margin: 20px 0;
+                }}
+                .btn:hover {{ background: #CC8B5C; }}
+                .footer {{ text-align: center; color: #999; font-size: 0.8rem; margin-top: 20px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔐 Gestor de Credenciales</h1>
+                    <p style="color: #CC8B5C;">Has sido invitado a unirte</p>
+                </div>
+                <div class="content">
+                    <h2>¡Hola {nombre}!</h2>
+                    <p>Has sido invitado a formar parte del <strong>Gestor de Credenciales</strong>, una plataforma para administrar accesos a servidores de forma segura.</p>
+                    
+                    <div style="text-align: center;">
+                        <a href="{link_aceptar}" class="btn">✅ Aceptar invitación</a>
+                    </div>
+                    
+                    <p style="color: #666; font-size: 0.9rem;">Este enlace expirará en <strong>24 horas</strong>.</p>
+                    <p style="color: #666; font-size: 0.9rem;">Si no reconoces esta solicitud, ignora este correo.</p>
+                </div>
+                <div class="footer">
+                    <p>© 2026 Gestor de Credenciales - Todos los derechos reservados</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        text = f"""
+        Has sido invitado al Gestor de Credenciales.
+        
+        Para aceptar la invitación, haz clic en el siguiente enlace:
+        {link_aceptar}
+        
+        Este enlace expirará en 24 horas.
+        """
+        
+        part1 = MIMEText(text, 'plain')
+        part2 = MIMEText(html, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        server = smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT'])
+        server.starttls()
+        server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
+        server.sendmail(app.config['MAIL_DEFAULT_SENDER'], [email], msg.as_string())
+        server.quit()
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error al enviar correo: {e}")
+        return False
+
+# ============ FUNCIONES DE JIRA ============
+
+def obtener_jira_client():
+    """Obtiene el cliente de Jira configurado"""
+    return {
+        'url': app.config['JIRA_URL'],
+        'auth': HTTPBasicAuth(
+            app.config['JIRA_EMAIL'],
+            app.config['JIRA_API_TOKEN']
+        ),
+        'headers': {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+    }
+
+def buscar_ticket_jira(numero_ticket):
+    """Busca un ticket en Jira por su número"""
+    client = obtener_jira_client()
+    
+    try:
+        response = requests.get(
+            f"{client['url']}/rest/api/3/issue/{numero_ticket}",
+            auth=client['auth'],
+            headers=client['headers']
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'id': data['id'],
+                'key': data['key'],
+                'summary': data['fields']['summary'],
+                'status': data['fields']['status']['name'],
+                'assignee': data['fields']['assignee']['displayName'] if data['fields']['assignee'] else None,
+                'priority': data['fields']['priority']['name'] if data['fields']['priority'] else None,
+                'created': data['fields']['created'],
+                'updated': data['fields']['updated'],
+                'description': data['fields']['description'],
+                'url': f"{client['url']}/browse/{data['key']}"
+            }
+        return None
+    except Exception as e:
+        print(f"❌ Error al buscar ticket en Jira: {e}")
+        return None
+
+def actualizar_ticket_jira(ticket_key, status=None, comentario=None):
+    """Actualiza un ticket en Jira"""
+    client = obtener_jira_client()
+    
+    try:
+        if status:
+            response = requests.get(
+                f"{client['url']}/rest/api/3/issue/{ticket_key}/transitions",
+                auth=client['auth'],
+                headers=client['headers']
+            )
+            
+            if response.status_code == 200:
+                transitions = response.json()
+                transition_id = None
+                for t in transitions['transitions']:
+                    if t['name'].lower() == status.lower():
+                        transition_id = t['id']
+                        break
+                
+                if transition_id:
+                    payload = {
+                        'transition': {'id': transition_id}
+                    }
+                    requests.post(
+                        f"{client['url']}/rest/api/3/issue/{ticket_key}/transitions",
+                        auth=client['auth'],
+                        headers=client['headers'],
+                        json=payload
+                    )
+        
+        if comentario:
+            payload = {
+                'body': {
+                    'type': 'doc',
+                    'version': 1,
+                    'content': [
+                        {
+                            'type': 'paragraph',
+                            'content': [
+                                {
+                                    'type': 'text',
+                                    'text': comentario
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+            requests.post(
+                f"{client['url']}/rest/api/3/issue/{ticket_key}/comment",
+                auth=client['auth'],
+                headers=client['headers'],
+                json=payload
+            )
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error al actualizar ticket en Jira: {e}")
+        return False
+
+# ============ FUNCIONES AUXILIARES ============
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def guardar_archivo_ppk(file):
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        import time
+        name, ext = os.path.splitext(filename)
+        filename = f"{name}_{int(time.time())}{ext}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        return filepath
+    return None
+
+def identificar_aplicacion(nombre_servidor):
+    codigos = {
+        'SFR': 'Salesforce',
+        'CON': 'Conectividad',
+        'RDD': 'RDD',
+        'IDE': 'Identidad',
+        'SYN': 'Synergia',
+        'OPE': 'Operaciones',
+        'APW': 'App Web',
+        'ADL': 'Administrador de Lecturas',
+        'CDP': 'Cloudera',
+        'POL': 'Poliweb',
+        'QDA': 'Quenda',
+        'BBT': 'Bitbucket',
+        'AFC': 'ERP AFC',
+        'SUP': 'Suprema',
+        'VOT': 'Votaciones',
+        'WCT': 'Web de Contratistas',
+        'CSE': 'CSE',
+        'PME': 'PME',
+        'SCA': 'Suite Cartografica',
+        'CTC': 'Contact Center',
+        'PLA': 'Plataformado'
+    }
+    
+    nombre_upper = nombre_servidor.upper()
+    for codigo in codigos.keys():
+        if codigo in nombre_upper:
+            app_obj = Aplicacion.query.filter_by(codigo=codigo).first()
+            if app_obj and app_obj.activo:
+                return app_obj.id
+    
+    return None
+
+# ============ CREAR TABLAS Y USUARIO ADMIN ============
+
+with app.app_context():
+    db.create_all()
+    
+    if not Usuario.query.filter_by(email='admin@gestor.com').first():
+        admin = Usuario(
+            nombre='Administrador',
+            email='admin@gestor.com',
+            contrasena_hash=bcrypt.generate_password_hash('admin123').decode('utf-8'),
+            es_admin=True,
+            es_invitado=False
+        )
+        db.session.add(admin)
+        db.session.commit()
+        print("✅ Usuario admin creado:")
+        print("   📧 Email: admin@gestor.com")
+        print("   🔑 Contraseña: admin123")
+    
+    print("✅ Base de datos creada. Las aplicaciones se registran manualmente.")
+
+# ============ RUTAS DE AUTENTICACIÓN ============
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    token = request.cookies.get('access_token')
+    if token:
+        payload = verificar_token(token)
+        if payload:
+            usuario = Usuario.query.get(payload['usuario_id'])
+            if usuario:
+                flash(f'✅ ¡Bienvenido de nuevo {usuario.nombre}!', 'success')
+                return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        email = request.form.get('email')
+        contrasena = request.form.get('contrasena')
+        
+        usuario = Usuario.query.filter_by(email=email).first()
+        
+        if usuario and usuario.verificar_contrasena(contrasena):
+            token = generar_token(usuario.id)
+            
+            response = redirect(url_for('dashboard'))
+            response.set_cookie(
+                'access_token', 
+                token, 
+                httponly=True, 
+                secure=False,
+                samesite='Lax',
+                max_age=app.config['JWT_ACCESS_TOKEN_EXPIRES']
+            )
+            
+            log_login(usuario.id)
+            flash(f'✅ ¡Bienvenido {usuario.nombre}!', 'success')
+            return response
+        else:
+            flash('❌ Email o contraseña incorrectos', 'error')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    token = request.cookies.get('access_token')
+    if token:
+        payload = verificar_token(token)
+        if payload:
+            log_logout(payload['usuario_id'])
+    
+    response = redirect(url_for('login'))
+    response.delete_cookie('access_token')
+    flash('👋 Sesión cerrada correctamente', 'info')
+    return response
+
+# ============ RUTAS DE INVITACIÓN ============
+
+@app.route('/aceptar-invitacion/<token>')
+def aceptar_invitacion(token):
+    email = verificar_token_invitacion(token)
+    
+    if not email:
+        flash('❌ El enlace de invitación ha expirado o es inválido', 'error')
+        return redirect(url_for('login'))
+    
+    usuario = Usuario.query.filter_by(email=email).first()
+    if not usuario:
+        flash('❌ Usuario no encontrado', 'error')
+        return redirect(url_for('login'))
+    
+    if not usuario.es_invitado:
+        flash('ℹ️ Este usuario ya ha aceptado la invitación', 'info')
+        return redirect(url_for('login'))
+    
+    return redirect(url_for('cambiar_contrasena_invitado', token=token))
+
+@app.route('/cambiar-contrasena-invitado/<token>', methods=['GET', 'POST'])
+def cambiar_contrasena_invitado(token):
+    email = verificar_token_invitacion(token)
+    
+    if not email:
+        flash('❌ El enlace ha expirado o es inválido', 'error')
+        return redirect(url_for('login'))
+    
+    usuario = Usuario.query.filter_by(email=email).first()
+    if not usuario:
+        flash('❌ Usuario no encontrado', 'error')
+        return redirect(url_for('login'))
+    
+    if not usuario.es_invitado:
+        flash('ℹ️ Este usuario ya ha establecido su contraseña', 'info')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        contrasena = request.form.get('contrasena')
+        confirmar = request.form.get('confirmar')
+        
+        if not contrasena or len(contrasena) < 6:
+            flash('❌ La contraseña debe tener al menos 6 caracteres', 'error')
+            return render_template('cambiar_contrasena.html', token=token, nombre=usuario.nombre)
+        
+        if contrasena != confirmar:
+            flash('❌ Las contraseñas no coinciden', 'error')
+            return render_template('cambiar_contrasena.html', token=token, nombre=usuario.nombre)
+        
+        usuario.contrasena_hash = bcrypt.generate_password_hash(contrasena).decode('utf-8')
+        usuario.es_invitado = False
+        usuario.token_invitacion = None
+        usuario.token_expiracion = None
+        usuario.fecha_aceptacion = datetime.utcnow()
+        
+        db.session.commit()
+        
+        flash('✅ Contraseña establecida correctamente. Ya puedes iniciar sesión.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('cambiar_contrasena.html', token=token, nombre=usuario.nombre)
+
+# ============ RUTAS PRINCIPALES (PROTEGIDAS) ============
+
+@app.route('/')
+@token_required
+def index(usuario):
+    return redirect(url_for('dashboard'))
+
+@app.route('/dashboard')
+@token_required
+def dashboard(usuario):
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    total_aplicaciones = Aplicacion.query.count()
+    total_usuarios = Usuario.query.count()
+    
+    ultimas_credenciales = Credencial.query.filter_by(
+        usuario_id=usuario.id
+    ).order_by(Credencial.fecha_creacion.desc()).limit(5).all()
+    
+    ultimas_actualizadas = Credencial.query.filter_by(
+        usuario_id=usuario.id
+    ).order_by(Credencial.fecha_actualizacion.desc()).limit(5).all()
+    
+    todas_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).all()
+    
+    fechas = [c.fecha_creacion for c in todas_credenciales if c.fecha_creacion]
+    df = pd.DataFrame({'fecha': fechas}) if fechas else pd.DataFrame(columns=['fecha'])
+    
+    if not df.empty:
+        df['mes'] = df['fecha'].dt.strftime('%Y-%m')
+        df['mes_nombre'] = df['fecha'].dt.strftime('%b %Y')
+        
+        datos_grafico = df.groupby(['mes', 'mes_nombre']).size().reset_index(name='cantidad')
+        datos_grafico = datos_grafico.sort_values('mes')
+        
+        hoy = datetime.now()
+        meses_12 = [(hoy - timedelta(days=30*i)).strftime('%Y-%m') for i in range(11, -1, -1)]
+        
+        meses_completos = []
+        for mes in meses_12:
+            registro = datos_grafico[datos_grafico['mes'] == mes]
+            if not registro.empty:
+                meses_completos.append({
+                    'mes': mes,
+                    'mes_nombre': registro.iloc[0]['mes_nombre'],
+                    'cantidad': int(registro.iloc[0]['cantidad'])
+                })
+            else:
+                fecha_obj = datetime.strptime(mes, '%Y-%m')
+                meses_completos.append({
+                    'mes': mes,
+                    'mes_nombre': fecha_obj.strftime('%b %Y'),
+                    'cantidad': 0
+                })
+        
+        datos_grafico = meses_completos
+    else:
+        datos_grafico = []
+    
+    datos_json = json.dumps(datos_grafico)
+    
+    return render_template('dashboard.html',
+        total_credenciales=total_credenciales,
+        total_aplicaciones=total_aplicaciones,
+        total_usuarios=total_usuarios,
+        ultimas_credenciales=ultimas_credenciales,
+        ultimas_actualizadas=ultimas_actualizadas,
+        datos_grafico=datos_grafico,
+        datos_json=datos_json,
+        usuario=usuario
+    )
+
+# ============ ENDPOINT PARA OBTENER CONTRASEÑA ============
+
+@app.route('/obtener-contrasena/<int:id>')
+@token_required
+def obtener_contrasena(usuario, id):
+    credencial = Credencial.query.get_or_404(id)
+    
+    if credencial.usuario_id != usuario.id:
+        return jsonify({'error': 'No tienes permiso'}), 403
+    
+    if credencial.tipo_autenticacion != 'password':
+        return jsonify({'error': 'No es una credencial de contraseña'}), 400
+    
+    contrasena = credencial.get_contrasena()
+    
+    if contrasena is not None:
+        return jsonify({'contrasena': contrasena})
+    
+    return jsonify({
+        'error': 'La contraseña está hasheada (bcrypt) y no se puede recuperar',
+        'sugerencia': 'Restablece la contraseña desde el formulario de edición'
+    }), 400
+
+# ============ RUTAS DE CRUD ============
+
+@app.route('/credenciales')
+@token_required
+def listar_credenciales(usuario):
+    """Lista todas las credenciales del usuario con filtros"""
+    from sqlalchemy import or_
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    
+    aplicacion_id = request.args.get('aplicacion', type=int)
+    estado = request.args.get('estado', '')
+    busqueda = request.args.get('buscar', '').strip()
+    
+    query = Credencial.query.filter_by(usuario_id=usuario.id)
+    
+    if aplicacion_id:
+        query = query.filter_by(aplicacion_id=aplicacion_id)
+    
+    if estado == 'activo':
+        query = query.filter(Credencial.fecha_actualizacion >= datetime.utcnow() - timedelta(days=30))
+    elif estado == 'inactivo':
+        query = query.filter(Credencial.fecha_actualizacion < datetime.utcnow() - timedelta(days=30))
+    
+    if busqueda:
+        query = query.filter(
+            or_(
+                Credencial.nombre_servidor.contains(busqueda),
+                Credencial.ip.contains(busqueda),
+                Credencial.usuario.contains(busqueda),
+                Credencial.descripcion.contains(busqueda)
+            )
+        )
+    
+    credenciales = query.order_by(Credencial.nombre_servidor).all()
+    
+    # Obtener sesiones activas para mostrar estado
+    for cred in credenciales:
+        cred.sesion_activa = SesionCredencial.query.filter_by(
+            credencial_id=cred.id,
+            estado='Activa'
+        ).first()
+    
+    aplicaciones = Aplicacion.query.filter_by(activo=True).order_by(Aplicacion.nombre).all()
+    
+    return render_template('credenciales.html',
+        credenciales=credenciales,
+        aplicaciones=aplicaciones,
+        aplicacion_seleccionada=aplicacion_id,
+        estado_seleccionado=estado,
+        busqueda=busqueda,
+        total_credenciales=total_credenciales,
+        usuario=usuario
+    )
+
+@app.route('/agregar', methods=['GET', 'POST'])
+@token_required
+def agregar(usuario):
+    """Agregar nueva credencial"""
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    aplicaciones = Aplicacion.query.filter_by(activo=True).order_by(Aplicacion.nombre).all()
+    
+    if request.method == 'POST':
+        try:
+            nombre = request.form['nombre_servidor']
+            ip = request.form.get('ip', '')
+            descripcion = request.form.get('descripcion', '')
+            tipo = request.form['tipo_autenticacion']
+            usuario_cred = request.form['usuario']
+            aplicacion_id = request.form.get('aplicacion_id')
+            
+            if not aplicacion_id or aplicacion_id == '':
+                aplicacion_id = identificar_aplicacion(nombre)
+            
+            if tipo == 'password':
+                contrasena = request.form['contrasena']
+                
+                nueva = Credencial(
+                    nombre_servidor=nombre,
+                    ip=ip,
+                    descripcion=descripcion,
+                    tipo_autenticacion=tipo,
+                    usuario=usuario_cred,
+                    usuario_id=usuario.id,
+                    aplicacion_id=aplicacion_id if aplicacion_id else None
+                )
+                nueva.set_contrasena(contrasena)
+                
+            else:
+                archivo_ppk = request.files.get('archivo_ppk')
+                
+                if archivo_ppk and archivo_ppk.filename != '':
+                    ruta_archivo = guardar_archivo_ppk(archivo_ppk)
+                    if ruta_archivo:
+                        with open(ruta_archivo, 'r', encoding='utf-8') as f:
+                            contenido_ppk = f.read()
+                        
+                        nueva = Credencial(
+                            nombre_servidor=nombre,
+                            ip=ip,
+                            descripcion=descripcion,
+                            tipo_autenticacion=tipo,
+                            usuario=usuario_cred,
+                            llave_publica='',
+                            llave_privada=contenido_ppk,
+                            ruta_archivo_ppk=ruta_archivo,
+                            usuario_id=usuario.id,
+                            aplicacion_id=aplicacion_id if aplicacion_id else None
+                        )
+                    else:
+                        flash('❌ Formato de archivo no permitido. Solo .ppk, .pem, .key', 'error')
+                        return render_template('agregar.html', aplicaciones=aplicaciones)
+                else:
+                    llave_publica = request.form.get('llave_publica', '')
+                    llave_privada = request.form.get('llave_privada', '')
+                    
+                    if not llave_privada:
+                        flash('❌ Debes subir un archivo .ppk o pegar el contenido de la llave', 'error')
+                        return render_template('agregar.html', aplicaciones=aplicaciones)
+                    
+                    nueva = Credencial(
+                        nombre_servidor=nombre,
+                        ip=ip,
+                        descripcion=descripcion,
+                        tipo_autenticacion=tipo,
+                        usuario=usuario_cred,
+                        llave_publica=llave_publica,
+                        llave_privada=llave_privada,
+                        ruta_archivo_ppk=None,
+                        usuario_id=usuario.id,
+                        aplicacion_id=aplicacion_id if aplicacion_id else None
+                    )
+            
+            db.session.add(nueva)
+            db.session.commit()
+            
+            log_creacion(usuario.id, 'credencial', nueva.id, f'Credencial: {nueva.nombre_servidor} - IP: {nueva.ip}')
+            
+            app_nombre = ''
+            if aplicacion_id:
+                app_obj = Aplicacion.query.get(aplicacion_id)
+                if app_obj:
+                    app_nombre = f' ({app_obj.codigo} - {app_obj.nombre})'
+            
+            flash(f'✅ Credencial guardada exitosamente{app_nombre}', 'success')
+            return redirect(url_for('listar_credenciales'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al guardar: {str(e)}', 'error')
+    
+    return render_template('agregar.html', 
+        aplicaciones=aplicaciones, 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/editar/<int:id>', methods=['GET', 'POST'])
+@token_required
+def editar(usuario, id):
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    credencial = Credencial.query.get_or_404(id)
+    aplicaciones = Aplicacion.query.filter_by(activo=True).order_by(Aplicacion.nombre).all()
+    
+    if credencial.usuario_id != usuario.id:
+        flash('❌ No tienes permiso para editar esta credencial', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    if request.method == 'POST':
+        try:
+            credencial.nombre_servidor = request.form['nombre_servidor']
+            credencial.ip = request.form.get('ip', '')
+            credencial.descripcion = request.form.get('descripcion', '')
+            credencial.usuario = request.form['usuario']
+            credencial.aplicacion_id = request.form.get('aplicacion_id')
+            
+            if credencial.tipo_autenticacion == 'password':
+                nueva_contrasena = request.form.get('contrasena', '')
+                if nueva_contrasena:
+                    credencial.set_contrasena(nueva_contrasena)
+            else:
+                archivo_ppk = request.files.get('archivo_ppk')
+                
+                if archivo_ppk and archivo_ppk.filename != '':
+                    ruta_archivo = guardar_archivo_ppk(archivo_ppk)
+                    if ruta_archivo:
+                        if credencial.ruta_archivo_ppk and os.path.exists(credencial.ruta_archivo_ppk):
+                            try:
+                                os.remove(credencial.ruta_archivo_ppk)
+                            except:
+                                pass
+                        
+                        with open(ruta_archivo, 'r', encoding='utf-8') as f:
+                            contenido_ppk = f.read()
+                        
+                        credencial.llave_privada = contenido_ppk
+                        credencial.ruta_archivo_ppk = ruta_archivo
+                    else:
+                        flash('❌ Formato de archivo no permitido. Solo .ppk, .pem, .key', 'error')
+                        return render_template('editar.html', credencial=credencial, aplicaciones=aplicaciones)
+                else:
+                    llave_privada = request.form.get('llave_privada', '')
+                    if llave_privada:
+                        credencial.llave_privada = llave_privada
+            
+            db.session.commit()
+            
+            log_edicion(usuario.id, 'credencial', credencial.id, f'Credencial actualizada: {credencial.nombre_servidor}')
+            
+            flash('✅ Credencial actualizada correctamente', 'success')
+            return redirect(url_for('listar_credenciales'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al actualizar: {str(e)}', 'error')
+    
+    return render_template('editar.html', 
+        credencial=credencial, 
+        aplicaciones=aplicaciones, 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/eliminar/<int:id>', methods=['POST'])
+@token_required
+def eliminar(usuario, id):
+    credencial = Credencial.query.get_or_404(id)
+    
+    if credencial.usuario_id != usuario.id:
+        flash('❌ No tienes permiso para eliminar esta credencial', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    try:
+        log_eliminacion(usuario.id, 'credencial', credencial.id, f'Credencial eliminada: {credencial.nombre_servidor}')
+        
+        if credencial.ruta_archivo_ppk and os.path.exists(credencial.ruta_archivo_ppk):
+            try:
+                os.remove(credencial.ruta_archivo_ppk)
+            except:
+                pass
+        
+        db.session.delete(credencial)
+        db.session.commit()
+        flash('🗑️ Credencial eliminada correctamente', 'info')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'❌ Error al eliminar: {str(e)}', 'error')
+    
+    return redirect(url_for('listar_credenciales'))
+
+@app.route('/descargar/<int:id>')
+@token_required
+def descargar_ppk(usuario, id):
+    credencial = Credencial.query.get_or_404(id)
+    
+    if credencial.usuario_id != usuario.id:
+        flash('❌ No tienes permiso para descargar esta credencial', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    if credencial.ruta_archivo_ppk and os.path.exists(credencial.ruta_archivo_ppk):
+        return send_file(
+            credencial.ruta_archivo_ppk,
+            as_attachment=True,
+            download_name=f"{credencial.nombre_servidor}.ppk"
+        )
+    else:
+        flash('❌ No hay archivo .ppk asociado a esta credencial', 'error')
+        return redirect(url_for('listar_credenciales'))
+
+# ============ RUTAS PARA APLICACIONES ============
+
+@app.route('/aplicaciones')
+@token_required
+def listar_aplicaciones(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para ver esta página', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    aplicaciones = Aplicacion.query.order_by(Aplicacion.codigo).all()
+    
+    return render_template('aplicaciones.html', 
+        aplicaciones=aplicaciones, 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/aplicaciones/agregar', methods=['GET', 'POST'])
+@token_required
+def agregar_aplicacion(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    
+    if request.method == 'POST':
+        try:
+            codigo = request.form['codigo'].upper().strip()
+            nombre = request.form['nombre'].strip()
+            descripcion = request.form.get('descripcion', '').strip()
+            
+            lider_principal_nombre = request.form.get('lider_principal_nombre', '').strip()
+            lider_principal_email = request.form.get('lider_principal_email', '').strip()
+            lider_principal_telefono = request.form.get('lider_principal_telefono', '').strip()
+            
+            lider_alterno_nombre = request.form.get('lider_alterno_nombre', '').strip()
+            lider_alterno_email = request.form.get('lider_alterno_email', '').strip()
+            lider_alterno_telefono = request.form.get('lider_alterno_telefono', '').strip()
+            
+            if Aplicacion.query.filter_by(codigo=codigo).first():
+                flash(f'❌ El código {codigo} ya existe', 'error')
+                return render_template('agregar_aplicacion.html')
+            
+            nueva_app = Aplicacion(
+                codigo=codigo,
+                nombre=nombre,
+                descripcion=descripcion,
+                activo=True
+            )
+            db.session.add(nueva_app)
+            db.session.flush()
+            
+            if lider_principal_nombre or lider_principal_email or lider_principal_telefono:
+                lider_principal = LiderTecnico(
+                    nombre=lider_principal_nombre if lider_principal_nombre else None,
+                    email=lider_principal_email if lider_principal_email else None,
+                    telefono=lider_principal_telefono if lider_principal_telefono else None,
+                    es_alterno=False,
+                    aplicacion_id=nueva_app.id
+                )
+                db.session.add(lider_principal)
+            
+            if lider_alterno_nombre or lider_alterno_email or lider_alterno_telefono:
+                lider_alterno = LiderTecnico(
+                    nombre=lider_alterno_nombre if lider_alterno_nombre else None,
+                    email=lider_alterno_email if lider_alterno_email else None,
+                    telefono=lider_alterno_telefono if lider_alterno_telefono else None,
+                    es_alterno=True,
+                    aplicacion_id=nueva_app.id
+                )
+                db.session.add(lider_alterno)
+            
+            db.session.commit()
+            
+            log_creacion(usuario.id, 'aplicacion', nueva_app.id, f'Aplicación: {nueva_app.codigo} - {nueva_app.nombre}')
+            
+            flash(f'✅ Aplicación {codigo} - {nombre} creada exitosamente', 'success')
+            return redirect(url_for('listar_aplicaciones'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al guardar: {str(e)}', 'error')
+    
+    return render_template('agregar_aplicacion.html', 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/aplicaciones/editar/<int:id>', methods=['GET', 'POST'])
+@token_required
+def editar_aplicacion(usuario, id):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    aplicacion = Aplicacion.query.get_or_404(id)
+    
+    if request.method == 'POST':
+        try:
+            aplicacion.codigo = request.form['codigo'].upper().strip()
+            aplicacion.nombre = request.form['nombre'].strip()
+            aplicacion.descripcion = request.form.get('descripcion', '').strip()
+            aplicacion.activo = 'activo' in request.form
+            
+            lider_principal_nombre = request.form.get('lider_principal_nombre', '').strip()
+            lider_principal_email = request.form.get('lider_principal_email', '').strip()
+            lider_principal_telefono = request.form.get('lider_principal_telefono', '').strip()
+            
+            lider_principal = LiderTecnico.query.filter_by(
+                aplicacion_id=aplicacion.id, 
+                es_alterno=False
+            ).first()
+            
+            if lider_principal_nombre or lider_principal_email or lider_principal_telefono:
+                if lider_principal:
+                    lider_principal.nombre = lider_principal_nombre
+                    lider_principal.email = lider_principal_email
+                    lider_principal.telefono = lider_principal_telefono
+                else:
+                    nuevo_lider = LiderTecnico(
+                        nombre=lider_principal_nombre,
+                        email=lider_principal_email,
+                        telefono=lider_principal_telefono,
+                        es_alterno=False,
+                        aplicacion_id=aplicacion.id
+                    )
+                    db.session.add(nuevo_lider)
+            else:
+                if lider_principal:
+                    db.session.delete(lider_principal)
+            
+            lider_alterno_nombre = request.form.get('lider_alterno_nombre', '').strip()
+            lider_alterno_email = request.form.get('lider_alterno_email', '').strip()
+            lider_alterno_telefono = request.form.get('lider_alterno_telefono', '').strip()
+            
+            lider_alterno = LiderTecnico.query.filter_by(
+                aplicacion_id=aplicacion.id, 
+                es_alterno=True
+            ).first()
+            
+            if lider_alterno_nombre or lider_alterno_email or lider_alterno_telefono:
+                if lider_alterno:
+                    lider_alterno.nombre = lider_alterno_nombre
+                    lider_alterno.email = lider_alterno_email
+                    lider_alterno.telefono = lider_alterno_telefono
+                else:
+                    nuevo_alterno = LiderTecnico(
+                        nombre=lider_alterno_nombre,
+                        email=lider_alterno_email,
+                        telefono=lider_alterno_telefono,
+                        es_alterno=True,
+                        aplicacion_id=aplicacion.id
+                    )
+                    db.session.add(nuevo_alterno)
+            else:
+                if lider_alterno:
+                    db.session.delete(lider_alterno)
+            
+            db.session.commit()
+            
+            log_edicion(usuario.id, 'aplicacion', aplicacion.id, f'Aplicación actualizada: {aplicacion.codigo} - {aplicacion.nombre}')
+            
+            flash(f'✅ Aplicación {aplicacion.codigo} actualizada correctamente', 'success')
+            return redirect(url_for('listar_aplicaciones'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al actualizar: {str(e)}', 'error')
+    
+    return render_template('editar_aplicacion.html', 
+        aplicacion=aplicacion, 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/aplicaciones/eliminar/<int:id>', methods=['POST'])
+@token_required
+def eliminar_aplicacion(usuario, id):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    aplicacion = Aplicacion.query.get_or_404(id)
+    
+    if aplicacion.credenciales:
+        flash(f'❌ No se puede eliminar {aplicacion.codigo} porque tiene credenciales asociadas', 'error')
+        return redirect(url_for('listar_aplicaciones'))
+    
+    try:
+        log_eliminacion(usuario.id, 'aplicacion', aplicacion.id, f'Aplicación eliminada: {aplicacion.codigo} - {aplicacion.nombre}')
+        
+        lideres = LiderTecnico.query.filter_by(aplicacion_id=aplicacion.id).all()
+        for lider in lideres:
+            db.session.delete(lider)
+        
+        db.session.delete(aplicacion)
+        db.session.commit()
+        flash(f'✅ Aplicación {aplicacion.codigo} eliminada correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'❌ Error al eliminar: {str(e)}', 'error')
+    
+    return redirect(url_for('listar_aplicaciones'))
+
+# ============ EXPORTAR APLICACIONES A EXCEL ============
+
+@app.route('/aplicaciones/exportar')
+@token_required
+def exportar_aplicaciones(usuario):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+    
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    aplicaciones = Aplicacion.query.order_by(Aplicacion.codigo).all()
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Aplicaciones"
+    
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="D4A373", end_color="D4A373", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    cell_alignment = Alignment(horizontal="left", vertical="center")
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    headers = ['Código', 'Nombre', 'Descripción', 'Líder Principal', 'Email Principal', 'Teléfono Principal', 'Líder Alterno', 'Email Alterno', 'Teléfono Alterno']
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = border
+    
+    for row, app in enumerate(aplicaciones, 2):
+        lider_principal = app.get_lider_principal()
+        lider_alterno = app.get_lider_alterno()
+        
+        ws.cell(row=row, column=1, value=app.codigo).alignment = cell_alignment
+        ws.cell(row=row, column=2, value=app.nombre).alignment = cell_alignment
+        ws.cell(row=row, column=3, value=app.descripcion or '').alignment = cell_alignment
+        ws.cell(row=row, column=4, value=lider_principal.nombre if lider_principal else '').alignment = cell_alignment
+        ws.cell(row=row, column=5, value=lider_principal.email if lider_principal else '').alignment = cell_alignment
+        ws.cell(row=row, column=6, value=lider_principal.telefono if lider_principal else '').alignment = cell_alignment
+        ws.cell(row=row, column=7, value=lider_alterno.nombre if lider_alterno else '').alignment = cell_alignment
+        ws.cell(row=row, column=8, value=lider_alterno.email if lider_alterno else '').alignment = cell_alignment
+        ws.cell(row=row, column=9, value=lider_alterno.telefono if lider_alterno else '').alignment = cell_alignment
+        
+        for col in range(1, 10):
+            ws.cell(row=row, column=col).border = border
+    
+    column_widths = {
+        'A': 12, 'B': 25, 'C': 35, 'D': 25, 'E': 30, 'F': 18, 'G': 25, 'H': 30, 'I': 18
+    }
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+    
+    total_row = len(aplicaciones) + 2
+    ws.cell(row=total_row, column=1, value=f"Total: {len(aplicaciones)}")
+    ws.cell(row=total_row, column=1).font = Font(bold=True)
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"aplicaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+# ============ IMPORTAR APLICACIONES DESDE EXCEL ============
+
+@app.route('/aplicaciones/importar', methods=['GET', 'POST'])
+@token_required
+def importar_aplicaciones(usuario):
+    from openpyxl import load_workbook
+    
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        if 'archivo_excel' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return render_template('importar_aplicaciones.html')
+        
+        file = request.files['archivo_excel']
+        
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return render_template('importar_aplicaciones.html')
+        
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            flash('❌ El archivo debe ser .xlsx o .xls', 'error')
+            return render_template('importar_aplicaciones.html')
+        
+        try:
+            wb = load_workbook(file)
+            ws = wb.active
+            
+            importados = 0
+            errores = 0
+            errores_lista = []
+            
+            for row in range(2, ws.max_row + 1):
+                codigo = ws.cell(row=row, column=1).value
+                nombre = ws.cell(row=row, column=2).value
+                descripcion = ws.cell(row=row, column=3).value
+                lider_principal_nombre = ws.cell(row=row, column=4).value
+                lider_principal_email = ws.cell(row=row, column=5).value
+                lider_principal_telefono = ws.cell(row=row, column=6).value
+                lider_alterno_nombre = ws.cell(row=row, column=7).value
+                lider_alterno_email = ws.cell(row=row, column=8).value
+                lider_alterno_telefono = ws.cell(row=row, column=9).value
+                
+                if not codigo and not nombre:
+                    continue
+                
+                if not codigo or not nombre:
+                    errores += 1
+                    errores_lista.append(f"Fila {row}: Código y Nombre son obligatorios")
+                    continue
+                
+                codigo = str(codigo).strip().upper()
+                nombre = str(nombre).strip()
+                
+                if Aplicacion.query.filter_by(codigo=codigo).first():
+                    errores += 1
+                    errores_lista.append(f"Fila {row}: El código {codigo} ya existe")
+                    continue
+                
+                nueva_app = Aplicacion(
+                    codigo=codigo,
+                    nombre=nombre,
+                    descripcion=str(descripcion).strip() if descripcion else None,
+                    activo=True
+                )
+                db.session.add(nueva_app)
+                db.session.flush()
+                
+                if lider_principal_nombre or lider_principal_email or lider_principal_telefono:
+                    lider_principal = LiderTecnico(
+                        nombre=str(lider_principal_nombre).strip() if lider_principal_nombre else None,
+                        email=str(lider_principal_email).strip() if lider_principal_email else None,
+                        telefono=str(lider_principal_telefono).strip() if lider_principal_telefono else None,
+                        es_alterno=False,
+                        aplicacion_id=nueva_app.id
+                    )
+                    db.session.add(lider_principal)
+                
+                if lider_alterno_nombre or lider_alterno_email or lider_alterno_telefono:
+                    lider_alterno = LiderTecnico(
+                        nombre=str(lider_alterno_nombre).strip() if lider_alterno_nombre else None,
+                        email=str(lider_alterno_email).strip() if lider_alterno_email else None,
+                        telefono=str(lider_alterno_telefono).strip() if lider_alterno_telefono else None,
+                        es_alterno=True,
+                        aplicacion_id=nueva_app.id
+                    )
+                    db.session.add(lider_alterno)
+                
+                importados += 1
+            
+            db.session.commit()
+            
+            mensaje = f"✅ {importados} aplicaciones importadas correctamente"
+            if errores > 0:
+                mensaje += f" ⚠️ {errores} errores encontrados"
+                flash(mensaje, 'warning')
+                if errores_lista:
+                    for error in errores_lista[:5]:
+                        flash(f"   - {error}", 'error')
+            else:
+                flash(mensaje, 'success')
+            
+            return redirect(url_for('listar_aplicaciones'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al importar: {str(e)}', 'error')
+            return render_template('importar_aplicaciones.html')
+    
+    return render_template('importar_aplicaciones.html')
+
+# ============ RUTAS PARA USUARIOS ============
+
+@app.route('/usuarios')
+@token_required
+def listar_usuarios(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para ver esta página', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    usuarios = Usuario.query.order_by(Usuario.nombre).all()
+    
+    return render_template('usuarios.html', 
+        usuarios=usuarios, 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/usuarios/agregar', methods=['GET', 'POST'])
+@token_required
+def agregar_usuario(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    
+    if request.method == 'POST':
+        try:
+            nombre = request.form['nombre'].strip()
+            email = request.form['email'].strip()
+            es_admin = 'es_admin' in request.form
+            
+            if Usuario.query.filter_by(email=email).first():
+                flash(f'❌ El email {email} ya está registrado', 'error')
+                return render_template('agregar_usuario.html')
+            
+            token = generar_token_invitacion(email)
+            expiracion = datetime.utcnow() + timedelta(hours=24)
+            
+            contrasena_temporal = token_urlsafe(12)
+            
+            nuevo = Usuario(
+                nombre=nombre,
+                email=email,
+                contrasena_hash=bcrypt.generate_password_hash(contrasena_temporal).decode('utf-8'),
+                es_admin=es_admin,
+                es_invitado=True,
+                token_invitacion=token,
+                token_expiracion=expiracion
+            )
+            db.session.add(nuevo)
+            db.session.commit()
+            
+            log_creacion(usuario.id, 'usuario', nuevo.id, f'Usuario creado: {nuevo.nombre} - {nuevo.email}')
+            
+            if enviar_correo_invitacion(email, nombre, token):
+                flash(f'✅ Usuario {nombre} creado. Se envió invitación a {email}', 'success')
+            else:
+                flash(f'⚠️ Usuario creado pero no se pudo enviar el correo. Token: {token}', 'warning')
+            
+            return redirect(url_for('listar_usuarios'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al guardar: {str(e)}', 'error')
+    
+    return render_template('agregar_usuario.html', 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/usuarios/editar/<int:id>', methods=['GET', 'POST'])
+@token_required
+def editar_usuario(usuario_actual, id):
+    if not usuario_actual.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario_actual.id).count()
+    usuario = Usuario.query.get_or_404(id)
+    
+    if usuario.id == usuario_actual.id and usuario.es_admin:
+        admins = Usuario.query.filter_by(es_admin=True).count()
+        if admins == 1:
+            flash('❌ No puedes editar tu propio usuario siendo el único administrador', 'error')
+            return redirect(url_for('listar_usuarios'))
+    
+    if request.method == 'POST':
+        try:
+            usuario.nombre = request.form['nombre'].strip()
+            usuario.email = request.form['email'].strip()
+            usuario.es_admin = 'es_admin' in request.form
+            
+            nueva_contrasena = request.form.get('contrasena', '')
+            if nueva_contrasena:
+                usuario.contrasena_hash = bcrypt.generate_password_hash(nueva_contrasena).decode('utf-8')
+            
+            db.session.commit()
+            
+            log_edicion(usuario_actual.id, 'usuario', usuario.id, f'Usuario actualizado: {usuario.nombre} - {usuario.email}')
+            
+            flash(f'✅ Usuario {usuario.nombre} actualizado correctamente', 'success')
+            return redirect(url_for('listar_usuarios'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al actualizar: {str(e)}', 'error')
+    
+    return render_template('editar_usuario.html', 
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+@app.route('/usuarios/eliminar/<int:id>', methods=['POST'])
+@token_required
+def eliminar_usuario(usuario_actual, id):
+    if not usuario_actual.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    usuario = Usuario.query.get_or_404(id)
+    
+    if usuario.id == usuario_actual.id:
+        flash('❌ No puedes eliminar tu propio usuario', 'error')
+        return redirect(url_for('listar_usuarios'))
+    
+    if usuario.es_admin:
+        admins = Usuario.query.filter_by(es_admin=True).count()
+        if admins == 1:
+            flash('❌ No puedes eliminar al último administrador', 'error')
+            return redirect(url_for('listar_usuarios'))
+    
+    try:
+        log_eliminacion(usuario_actual.id, 'usuario', usuario.id, f'Usuario eliminado: {usuario.nombre} - {usuario.email}')
+        
+        db.session.delete(usuario)
+        db.session.commit()
+        flash(f'✅ Usuario {usuario.nombre} eliminado correctamente', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'❌ Error al eliminar: {str(e)}', 'error')
+    
+    return redirect(url_for('listar_usuarios'))
+
+# ============ RUTAS PARA BACKUPS ============
+
+@app.route('/configuracion/backups', methods=['GET', 'POST'])
+@token_required
+def configurar_backups(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    config = get_backup_config()
+    
+    if request.method == 'POST':
+        try:
+            config.frecuencia_full = int(request.form.get('frecuencia_full', 30))
+            config.frecuencia_incremental = int(request.form.get('frecuencia_incremental', 14))
+            config.hora = int(request.form.get('hora', 2))
+            config.minuto = int(request.form.get('minuto', 0))
+            config.max_backups = int(request.form.get('max_backups', 10))
+            config.activo = 'activo' in request.form
+            
+            if config.frecuencia_full < 1:
+                config.frecuencia_full = 1
+            if config.frecuencia_incremental < 1:
+                config.frecuencia_incremental = 1
+            
+            db.session.commit()
+            flash('✅ Configuración de backups actualizada correctamente', 'success')
+            return redirect(url_for('configurar_backups'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Error al guardar: {str(e)}', 'error')
+    
+    logs = BackupLog.query.order_by(BackupLog.fecha.desc()).limit(20).all()
+    
+    total_backups = BackupLog.query.count()
+    exitosos = BackupLog.query.filter_by(estado='exitoso').count()
+    fallidos = BackupLog.query.filter_by(estado='fallido').count()
+    
+    return render_template('config_backup.html',
+        config=config,
+        logs=logs,
+        total_backups=total_backups,
+        exitosos=exitosos,
+        fallidos=fallidos,
+        usuario=usuario,
+        total_credenciales=Credencial.query.filter_by(usuario_id=usuario.id).count()
+    )
+
+@app.route('/backups/ejecutar/full')
+@token_required
+def ejecutar_backup_full(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    exito, mensaje = crear_backup_full()
+    if exito:
+        flash(f'✅ Backup full creado exitosamente', 'success')
+    else:
+        flash(f'❌ Error al crear backup: {mensaje}', 'error')
+    
+    return redirect(url_for('configurar_backups'))
+
+@app.route('/backups/ejecutar/incremental')
+@token_required
+def ejecutar_backup_incremental(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para realizar esta acción', 'error')
+        return redirect(url_for('dashboard'))
+    
+    exito, mensaje = crear_backup_incremental()
+    if exito:
+        flash(f'✅ Backup incremental creado exitosamente', 'success')
+    else:
+        flash(f'❌ Error al crear backup: {mensaje}', 'error')
+    
+    return redirect(url_for('configurar_backups'))
+
+# ============ RUTA DE AUDITORÍA ============
+
+@app.route('/auditoria')
+@token_required
+def ver_auditoria(usuario):
+    if not usuario.es_admin:
+        flash('❌ No tienes permiso para ver esta página', 'error')
+        return redirect(url_for('dashboard'))
+    
+    total_credenciales = Credencial.query.filter_by(usuario_id=usuario.id).count()
+    
+    accion = request.args.get('accion', '')
+    entidad = request.args.get('entidad', '')
+    fecha_desde = request.args.get('fecha_desde', '')
+    fecha_hasta = request.args.get('fecha_hasta', '')
+    
+    query = LogAuditoria.query
+    
+    if accion:
+        query = query.filter_by(accion=accion)
+    
+    if entidad:
+        query = query.filter_by(entidad=entidad)
+    
+    if fecha_desde:
+        try:
+            fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+            query = query.filter(LogAuditoria.fecha >= fecha_desde_dt)
+        except:
+            pass
+    
+    if fecha_hasta:
+        try:
+            fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+            query = query.filter(LogAuditoria.fecha <= fecha_hasta_dt + timedelta(days=1))
+        except:
+            pass
+    
+    logs = query.order_by(LogAuditoria.fecha.desc()).limit(200).all()
+    
+    acciones = db.session.query(LogAuditoria.accion).distinct().all()
+    entidades = db.session.query(LogAuditoria.entidad).distinct().all()
+    
+    return render_template('auditoria.html',
+        logs=logs,
+        acciones=[a[0] for a in acciones],
+        entidades=[e[0] for e in entidades],
+        accion_seleccionada=accion,
+        entidad_seleccionada=entidad,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        usuario=usuario,
+        total_credenciales=total_credenciales
+    )
+
+# ============ RUTAS CHECK-IN / CHECK-OUT ============
+
+@app.route('/checkin/<int:credencial_id>', methods=['GET', 'POST'])
+@token_required
+def checkin_credencial(usuario, credencial_id):
+    """Check-in de credencial con ticket de Jira"""
+    credencial = Credencial.query.get_or_404(credencial_id)
+    
+    # Verificar que la credencial está disponible
+    sesion_activa = SesionCredencial.query.filter_by(
+        credencial_id=credencial_id,
+        estado='Activa'
+    ).first()
+    
+    if sesion_activa:
+        flash('❌ Esta credencial ya está en uso', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    if request.method == 'POST':
+        ticket_key = request.form.get('ticket_key', '').strip().upper()
+        
+        if not ticket_key:
+            flash('❌ Debes ingresar un número de ticket', 'error')
+            return render_template('checkin.html', credencial=credencial)
+        
+        # Verificar ticket en Jira
+        ticket_info = buscar_ticket_jira(ticket_key)
+        
+        if not ticket_info:
+            flash(f'❌ Ticket {ticket_key} no encontrado en Jira', 'error')
+            return render_template('checkin.html', credencial=credencial)
+        
+        # Verificar que el ticket está abierto
+        if ticket_info['status'].lower() not in ['abierto', 'open', 'en progreso', 'in progress']:
+            flash(f'❌ El ticket {ticket_key} no está activo (Estado: {ticket_info["status"]})', 'error')
+            return render_template('checkin.html', credencial=credencial)
+        
+        # Guardar ticket en base de datos local
+        ticket = Ticket.query.filter_by(numero_ticket=ticket_key).first()
+        if not ticket:
+            ticket = Ticket(
+                numero_ticket=ticket_key,
+                titulo=ticket_info['summary'],
+                descripcion=ticket_info.get('description', ''),
+                prioridad=ticket_info.get('priority', 'Media'),
+                estado='Abierto',
+                servidor=credencial.nombre_servidor,
+                aplicacion_id=credencial.aplicacion_id,
+                creado_por=usuario.id
+            )
+            db.session.add(ticket)
+            db.session.commit()
+        
+        # Generar nueva contraseña
+        nueva_contrasena = token_urlsafe(16)
+        contrasena_encriptada = encriptar_contrasena(nueva_contrasena)
+        
+        # Crear sesión
+        sesion = SesionCredencial(
+            credencial_id=credencial_id,
+            ticket_id=ticket.id,
+            usuario_id=usuario.id,
+            check_in=datetime.utcnow(),
+            contrasena_usada=contrasena_encriptada,
+            fecha_inicio_real=datetime.utcnow(),
+            estado='Activa'
+        )
+        db.session.add(sesion)
+        db.session.commit()
+        
+        # Rotar contraseña
+        rotacion = RotacionContrasena(
+            credencial_id=credencial_id,
+            usuario_id=usuario.id,
+            sesion_id=sesion.id,
+            contrasena_anterior=credencial.contrasena,
+            contrasena_nueva=contrasena_encriptada
+        )
+        db.session.add(rotacion)
+        
+        # Actualizar credencial
+        credencial.contrasena = contrasena_encriptada
+        db.session.commit()
+        
+        # Actualizar ticket en Jira
+        actualizar_ticket_jira(
+            ticket_key,
+            status='En Progreso',
+            comentario=f"🔐 Check-in realizado por {usuario.nombre} para la credencial {credencial.nombre_servidor}"
+        )
+        
+        log_creacion(usuario.id, 'sesion', sesion.id, 
+                     f'Check-in: Ticket {ticket_key} - Credencial {credencial.nombre_servidor}')
+        
+        flash(f'✅ Check-in exitoso para ticket {ticket_key}', 'success')
+        flash(f'🔑 Nueva contraseña: {nueva_contrasena}', 'success')
+        
+        return redirect(url_for('listar_credenciales'))
+    
+    return render_template('checkin.html', credencial=credencial)
+
+@app.route('/checkout/<int:sesion_id>', methods=['GET', 'POST'])
+@token_required
+def checkout_credencial(usuario, sesion_id):
+    """Check-out de credencial"""
+    sesion = SesionCredencial.query.get_or_404(sesion_id)
+    credencial = sesion.credencial
+    
+    if sesion.usuario_id != usuario.id and not usuario.es_admin:
+        flash('❌ Solo el usuario que hizo check-in puede hacer check-out', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    if sesion.estado != 'Activa':
+        flash('❌ Esta sesión ya está cerrada', 'error')
+        return redirect(url_for('listar_credenciales'))
+    
+    if request.method == 'POST':
+        motivo = request.form.get('motivo', 'Ticket completado')
+        
+        sesion.check_out = datetime.utcnow()
+        sesion.fecha_fin_real = datetime.utcnow()
+        sesion.estado = 'Cerrada'
+        sesion.motivo_cierre = motivo
+        
+        ticket = sesion.ticket
+        if ticket:
+            ticket.estado = 'Resuelto'
+            ticket.fecha_cierre = datetime.utcnow()
+        
+        db.session.commit()
+        
+        if ticket:
+            actualizar_ticket_jira(
+                ticket.numero_ticket,
+                status='Resuelto',
+                comentario=f"🔐 Check-out realizado por {usuario.nombre}. Motivo: {motivo}"
+            )
+        
+        log_creacion(usuario.id, 'sesion', sesion.id, 
+                     f'Check-out: Ticket {sesion.ticket.numero_ticket} - Credencial {credencial.nombre_servidor}')
+        
+        flash('✅ Check-out realizado correctamente', 'success')
+        return redirect(url_for('listar_credenciales'))
+    
+    return render_template('checkout.html', sesion=sesion, credencial=credencial)
+
+# ============ INICIAR LA APLICACIÓN ============
+
+if __name__ == '__main__':
+    print("\n" + "="*50)
+    print("🚀 GESTOR DE CREDENCIALES")
+    print("="*50)
+    print("🌐 Servidor: http://127.0.0.1:5000")
+    print("\n📧 Usuario: admin@gestor.com")
+    print("🔑 Contraseña: admin123")
+    print("="*50 + "\n")
+    
+    iniciar_planificador_backups()
+    
+    app.run(debug=True, host='127.0.0.1', port=5000)

@@ -144,7 +144,7 @@ def token_required(f):
             flash('🔐 Sesión expirada. Por favor, inicia sesión nuevamente', 'warning')
             return redirect(url_for('login'))
         
-        usuario = Usuario.query.get(payload['usuario_id'])
+        usuario = db.session.get(Usuario, payload['usuario_id'])
         if not usuario:
             flash('❌ Usuario no encontrado', 'error')
             return redirect(url_for('login'))
@@ -723,7 +723,7 @@ def login():
     if token:
         payload = verificar_token(token)
         if payload:
-            usuario = Usuario.query.get(payload['usuario_id'])
+            usuario = db.session.get(Usuario, payload['usuario_id'])
             if usuario:
                 flash(f'✅ ¡Bienvenido de nuevo {usuario.nombre}!', 'success')
                 return redirect(url_for('dashboard'))
@@ -2080,7 +2080,7 @@ def api_checkin():
     if token:
         payload = verificar_token(token)
         if payload:
-            usuario = Usuario.query.get(payload['usuario_id'])
+            usuario = db.session.get(Usuario, payload['usuario_id'])
         else:
             return jsonify({'error': 'Token inválido'}), 401
     else:
@@ -2158,7 +2158,7 @@ def api_checkout(sesion_id):
     if token:
         payload = verificar_token(token)
         if payload:
-            usuario = Usuario.query.get(payload['usuario_id'])
+            usuario = db.session.get(Usuario, payload['usuario_id'])
         else:
             return jsonify({'error': 'Token inválido'}), 401
     else:
@@ -2235,4 +2235,4 @@ if __name__ == '__main__':
     
     iniciar_planificador_backups()
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)
